@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🧪 Tests — محوّل صيغ Excel</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --surface: #fff; --surface-2: #fafbfc;
+    --border: #e1e5eb; --text: #1a2332; --text-soft: #5a6677;
+    --pass: #2f7d4f; --pass-bg: #f0fdf4;
+    --fail: #c53030; --fail-bg: #fff5f5;
+    --primary: #2c5282; --code-bg: #1e293b; --code-text: #e2e8f0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+    padding: 32px 24px 64px;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  header {
+    position: sticky; top: 0; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 18px 22px; margin-bottom: 24px;
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px; z-index: 10;
+  }
+  header h1 { font-size: 22px; }
+  .summary { display: flex; gap: 12px; align-items: center; font-size: 14px; }
+  .summary .total { color: var(--text-soft); }
+  .summary .pass-count { color: var(--pass); font-weight: 700; font-size: 18px; }
+  .summary .fail-count { color: var(--fail); font-weight: 700; font-size: 18px; }
+  .summary .duration { color: var(--text-soft); font-size: 12px; }
+  .summary .pill {
+    padding: 4px 12px; border-radius: 14px; font-size: 12px; font-weight: 600;
+  }
+  .summary .pill.all-pass { background: var(--pass-bg); color: var(--pass); }
+  .summary .pill.has-fail { background: var(--fail-bg); color: var(--fail); }
+
+  .controls { display: flex; gap: 8px; }
+  .btn {
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 6px 14px; border-radius: 6px; font-size: 13px;
+    cursor: pointer; font-family: inherit; color: var(--text);
+  }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+  section.category {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; margin-bottom: 16px; overflow: hidden;
+  }
+  section.category > h2 {
+    padding: 12px 18px; background: var(--surface-2);
+    border-bottom: 1px solid var(--border); font-size: 14px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  section.category > h2 .cat-counts { font-size: 12px; font-weight: 500; color: var(--text-soft); }
+  section.category > h2 .cat-counts .ok { color: var(--pass); font-weight: 700; }
+  section.category > h2 .cat-counts .ko { color: var(--fail); font-weight: 700; }
+
+  ul.tests { list-style: none; }
+  ul.tests li {
+    padding: 8px 18px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 13.5px;
+  }
+  ul.tests li:last-child { border-bottom: 0; }
+  ul.tests li .status {
+    flex-shrink: 0; width: 22px; height: 22px;
+    border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 12px;
+  }
+  ul.tests li.pass .status { background: var(--pass-bg); color: var(--pass); }
+  ul.tests li.fail .status { background: var(--fail-bg); color: var(--fail); }
+  ul.tests li.fail { background: var(--fail-bg); }
+  ul.tests li .name { flex: 1; }
+  ul.tests li pre {
+    margin-top: 6px; background: var(--code-bg); color: var(--code-text);
+    padding: 10px 14px; border-radius: 5px; font-size: 12px;
+    direction: ltr; text-align: left; overflow-x: auto; white-space: pre-wrap;
+    line-height: 1.5;
+  }
+
+  .filter-only-fail ul.tests li.pass { display: none; }
+  .filter-only-fail section.category[data-fails="0"] { display: none; }
+
+  footer {
+    margin-top: 32px; text-align: center; color: var(--text-soft); font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>🧪 Tests Suite — V3</h1>
+  <div class="summary" id="summary"></div>
+  <div class="controls">
+    <button class="btn" id="btn-toggle-failed">عرض الفاشلة فقط</button>
+    <button class="btn primary" id="btn-rerun">إعادة التشغيل</button>
+  </div>
+</header>
+
+<main id="results"></main>
+
+<footer>
+  <p>افتح هذا الملف في أي متصفح لتشغيل الاختبارات. لا يحتاج سيرفر.</p>
+</footer>
+
+</div>
+
+<!-- نفس السكربتات اللي يستعملها index.html -->
+<script src="assets/helpers.js"></script>
+<script src="assets/functions.js"></script>
+<script src="assets/engine.js"></script>
+
+<script>
+/* ============================================================
+   Test framework صغير (assertions + runner)
+   ============================================================ */
+const TESTS = [];
+
+function test(category, name, fn) {
+  TESTS.push({ category, name, fn });
+}
+
+function assertEqual(actual, expected, label) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a === e) return;
+  if (Number.isNaN(actual) && Number.isNaN(expected)) return;
+  throw new Error(
+    (label ? label + '\n  ' : '') +
+    `expected: ${e}\n  actual:   ${a}`
+  );
+}
+
+function assertClose(actual, expected, eps, label) {
+  eps = eps ?? 1e-9;
+  if (typeof actual !== 'number' || isNaN(actual)) {
+    throw new Error((label || '') + ` not a number: ${actual}`);
+  }
+  if (Math.abs(actual - expected) > eps) {
+    throw new Error((label || '') + ` |${actual} - ${expected}| > ${eps}`);
+  }
+}
+
+function assertContains(haystack, needle, label) {
+  if (typeof haystack !== 'string' || haystack.indexOf(needle) === -1) {
+    throw new Error(
+      (label ? label + '\n  ' : '') +
+      `expected to contain: ${JSON.stringify(needle)}\n  in:               ${JSON.stringify(haystack)}`
+    );
+  }
+}
+
+function assertThrows(fn, msgPart, label) {
+  let threw = false;
+  let actualMsg = '';
+  try { fn(); }
+  catch (e) {
+    threw = true;
+    actualMsg = e.message;
+    if (msgPart && actualMsg.indexOf(msgPart) === -1) {
+      throw new Error(
+        (label ? label + '\n  ' : '') +
+        `error message did not contain: ${JSON.stringify(msgPart)}\n  got: ${JSON.stringify(actualMsg)}`
+      );
+    }
+  }
+  if (!threw) throw new Error((label ? label + '\n  ' : '') + 'expected to throw, but did not');
+}
+
+/* ============================================================
+   Runtime helper: ينفّذ صيغة على قيم خلايا ويرجّع النتيجة
+   ============================================================ */
+function runFormula(formula, cellValues) {
+  cellValues = cellValues || {};
+  const { code, usedCells } = convertFormula(formula);
+  const body = code + `\nreturn calculate(${usedCells.join(', ')});`;
+  const fn = new Function(...usedCells, body);
+  const args = usedCells.map(c => cellValues[c]);
+  return fn(...args);
+}
+
+/* ============================================================
+   جامع نتائج التشغيل
+   ============================================================ */
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function runAll() {
+  const t0 = performance.now();
+  const groups = {};
+  let totalPass = 0, totalFail = 0;
+
+  for (const t of TESTS) {
+    if (!groups[t.category]) groups[t.category] = { pass: 0, fail: 0, items: [] };
+    let ok = true, msg = '';
+    try { t.fn(); }
+    catch (e) { ok = false; msg = e.message + (e.stack ? '\n\n' + e.stack.split('\n').slice(1, 3).join('\n') : ''); }
+    if (ok) { groups[t.category].pass++; totalPass++; }
+    else    { groups[t.category].fail++; totalFail++; }
+    groups[t.category].items.push({ name: t.name, ok, msg });
+  }
+
+  const t1 = performance.now();
+  const ms = (t1 - t0).toFixed(0);
+
+  const $results = document.getElementById('results');
+  $results.innerHTML = '';
+  for (const [cat, data] of Object.entries(groups)) {
+    const sec = document.createElement('section');
+    sec.className = 'category';
+    sec.dataset.fails = String(data.fail);
+    sec.innerHTML = `
+      <h2>
+        ${escapeHtml(cat)}
+        <span class="cat-counts">
+          <span class="ok">${data.pass}</span> /
+          ${data.pass + data.fail}
+          ${data.fail > 0 ? `<span style="margin-right: 8px"><span class="ko">${data.fail}</span> فاشلة</span>` : ''}
+        </span>
+      </h2>
+      <ul class="tests"></ul>
+    `;
+    const ul = sec.querySelector('ul.tests');
+    for (const item of data.items) {
+      const li = document.createElement('li');
+      li.className = item.ok ? 'pass' : 'fail';
+      li.innerHTML = `
+        <span class="status">${item.ok ? '✓' : '✗'}</span>
+        <div class="name">
+          ${escapeHtml(item.name)}
+          ${!item.ok ? `<pre>${escapeHtml(item.msg)}</pre>` : ''}
+        </div>
+      `;
+      ul.appendChild(li);
+    }
+    $results.appendChild(sec);
+  }
+
+  const total = totalPass + totalFail;
+  const pillClass = totalFail === 0 ? 'all-pass' : 'has-fail';
+  const pillText = totalFail === 0 ? '✓ كل شي تمام' : `✗ ${totalFail} فاشلة`;
+  document.getElementById('summary').innerHTML = `
+    <span class="pass-count">${totalPass}</span>
+    <span class="total">/ ${total}</span>
+    <span class="pill ${pillClass}">${pillText}</span>
+    <span class="duration">(${ms} ms)</span>
+  `;
+  document.title = `${totalFail === 0 ? '✅' : '❌'} ${totalPass}/${total} — Tests`;
+}
+
+document.getElementById('btn-rerun').addEventListener('click', runAll);
+document.getElementById('btn-toggle-failed').addEventListener('click', (e) => {
+  document.body.classList.toggle('filter-only-fail');
+  e.target.textContent = document.body.classList.contains('filter-only-fail')
+    ? 'عرض كل الاختبارات' : 'عرض الفاشلة فقط';
+});
+</script>
+
+<!-- الاختبارات نفسها -->
+<script src="tests/suite.js"></script>
+
+<script>
+  // شغّل بعد ما تتحمل كل التيستات
+  runAll();
+</script>
+
+</body>
+</html>
