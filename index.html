@@ -1,0 +1,1572 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>محوّل صيغ Excel إلى JavaScript - V2</title>
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --surface: #ffffff;
+    --surface-2: #fafbfc;
+    --border: #e1e5eb;
+    --border-strong: #cdd4dc;
+    --text: #1a2332;
+    --text-soft: #5a6677;
+    --text-mute: #8a94a3;
+    --primary: #2c5282;
+    --primary-hover: #1e3a5f;
+    --primary-soft: #ebf2fa;
+    --accent: #3182ce;
+    --success: #2f7d4f;
+    --error: #c53030;
+    --error-bg: #fff5f5;
+    --warn: #b7791f;
+    --warn-bg: #fffaf0;
+    --code-bg: #1e293b;
+    --code-text: #e2e8f0;
+    --code-keyword: #f0a4a4;
+    --code-string: #9ae6b4;
+    --code-number: #f6ad55;
+    --code-fn: #90cdf4;
+    --code-comment: #718096;
+    --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+    --shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+    --radius: 8px;
+    --radius-sm: 5px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .container { max-width: 1280px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header { margin-bottom: 32px; padding-bottom: 24px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.3px; margin-bottom: 8px; color: var(--text); }
+  header p { color: var(--text-soft); font-size: 15px; max-width: 760px; }
+  header .badge {
+    display: inline-block; background: var(--primary-soft); color: var(--primary);
+    padding: 3px 10px; border-radius: 4px; font-size: 12px; font-weight: 600;
+    margin-left: 8px; vertical-align: middle;
+  }
+  header .badge.count { background: #f0fdf4; color: var(--success); }
+
+  .main-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 28px;
+  }
+  @media (max-width: 900px) { .main-grid { grid-template-columns: 1fr; } }
+
+  .panel {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow-sm); overflow: hidden;
+  }
+  .panel-header {
+    padding: 14px 18px; border-bottom: 1px solid var(--border); background: var(--surface-2);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .panel-header h2 { font-size: 14px; font-weight: 600; color: var(--text); letter-spacing: 0.2px; }
+  .panel-header .actions { display: flex; gap: 8px; }
+  .panel-body { padding: 0; }
+
+  .editor-wrap { position: relative; direction: ltr; text-align: right; }
+  .editor-highlight, .editor-input {
+    font-family: 'Consolas', 'Courier New', monospace; font-size: 15px;
+    line-height: 1.7; padding: 16px 18px; border: 0; width: 100%;
+    min-height: 180px; margin: 0; white-space: pre-wrap;
+    word-break: break-word; overflow-wrap: break-word;
+  }
+  .editor-highlight {
+    position: absolute; inset: 0; color: transparent;
+    pointer-events: none; z-index: 1; overflow: hidden;
+  }
+  .editor-input {
+    position: relative; background: transparent; color: var(--text);
+    resize: vertical; outline: none; z-index: 2; caret-color: var(--primary);
+  }
+  .editor-input:focus { background: rgba(49, 130, 206, 0.02); }
+
+  .err-mark {
+    background: rgba(197, 48, 48, 0.18);
+    border-bottom: 2px wavy var(--error); border-radius: 2px;
+  }
+  .tk-fn      { color: #2b6cb0; font-weight: 600; }
+  .tk-num     { color: #b7791f; }
+  .tk-str     { color: #2f7d4f; }
+  .tk-cell    { color: #6b46c1; }
+  .tk-op      { color: #4a5568; }
+  .tk-paren   { color: #2d3748; }
+
+  .output-wrap {
+    background: var(--code-bg); color: var(--code-text);
+    font-family: 'Consolas', 'Courier New', monospace; font-size: 13.5px;
+    line-height: 1.7; direction: ltr; text-align: left;
+    overflow: auto; min-height: 180px; max-height: 480px;
+  }
+  .code-block { display: flex; min-width: 100%; }
+  .line-numbers {
+    user-select: none; padding: 16px 12px 16px 14px; color: #475569;
+    background: rgba(0, 0, 0, 0.18); text-align: right;
+    border-left: 1px solid rgba(255, 255, 255, 0.06); flex-shrink: 0;
+  }
+  .line-numbers div { line-height: 1.7; }
+  .code-content { padding: 16px 18px; flex: 1; white-space: pre; overflow-x: auto; }
+  .code-keyword { color: var(--code-keyword); }
+  .code-string  { color: var(--code-string); }
+  .code-number  { color: var(--code-number); }
+  .code-fn      { color: var(--code-fn); }
+  .code-comment { color: var(--code-comment); font-style: italic; }
+  .code-empty {
+    padding: 28px; color: var(--text-mute); text-align: center; font-style: italic;
+  }
+
+  .output-info {
+    background: var(--surface-2); border-top: 1px solid var(--border);
+    padding: 8px 16px; font-size: 12px; color: var(--text-soft);
+    display: flex; gap: 16px; flex-wrap: wrap;
+  }
+  .output-info .info-item { display: inline-flex; align-items: center; gap: 4px; }
+  .output-info code {
+    background: var(--surface); padding: 1px 5px; border-radius: 3px;
+    font-family: 'Consolas', monospace; direction: ltr; font-size: 11px;
+  }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border-strong); background: var(--surface);
+    color: var(--text); padding: 7px 14px; border-radius: var(--radius-sm);
+    font-size: 13px; font-weight: 500; font-family: inherit;
+    cursor: pointer; transition: all 0.15s ease;
+  }
+  .btn:hover { background: var(--surface-2); border-color: var(--text-mute); }
+  .btn-primary {
+    background: var(--primary); color: white; border-color: var(--primary);
+    padding: 9px 22px; font-size: 14px; font-weight: 600;
+  }
+  .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .btn-icon { font-size: 14px; }
+
+  .convert-bar { display: flex; justify-content: center; margin: -8px 0 28px; }
+
+  .status {
+    margin: 0 0 24px; padding: 12px 16px; border-radius: var(--radius-sm);
+    font-size: 14px; border-right: 4px solid; display: none;
+  }
+  .status.show { display: block; }
+  .status.success { background: #f0fdf4; color: var(--success); border-color: var(--success); }
+  .status.error   { background: var(--error-bg); color: var(--error); border-color: var(--error); }
+  .status.warn    { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+  .status code {
+    background: rgba(0, 0, 0, 0.06); padding: 1px 6px; border-radius: 3px;
+    font-family: 'Consolas', monospace; direction: ltr; display: inline-block;
+  }
+
+  .examples-section { margin-bottom: 32px; }
+  .section-title {
+    font-size: 15px; font-weight: 600; margin-bottom: 14px;
+    color: var(--text); display: flex; align-items: center; gap: 8px;
+  }
+  .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .examples-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;
+  }
+  .example-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 14px 16px;
+    cursor: pointer; transition: all 0.15s ease; text-align: right;
+  }
+  .example-card:hover {
+    border-color: var(--primary); background: var(--primary-soft);
+    transform: translateY(-1px); box-shadow: var(--shadow);
+  }
+  .example-card .label {
+    font-size: 12px; color: var(--text-soft); margin-bottom: 6px;
+    font-weight: 500; display: flex; justify-content: space-between; align-items: center;
+  }
+  .example-card .formula {
+    font-family: 'Consolas', monospace; font-size: 12.5px; color: var(--text);
+    direction: ltr; text-align: left; word-break: break-all;
+  }
+  .example-card .cat-pill { font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 600; }
+
+  .reference-section { margin-bottom: 32px; }
+  .ref-controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .filter-btn {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-soft); padding: 6px 14px; border-radius: 16px;
+    font-size: 12px; font-weight: 500; cursor: pointer;
+    transition: all 0.15s ease; font-family: inherit;
+  }
+  .filter-btn:hover { border-color: var(--text-mute); }
+  .filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+  .ref-table-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm);
+  }
+  .ref-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .ref-table thead { background: var(--surface-2); }
+  .ref-table th {
+    padding: 12px 16px; text-align: right; font-weight: 600; font-size: 12px;
+    color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+  }
+  .ref-table td { padding: 12px 16px; border-bottom: 1px solid var(--border); }
+  .ref-table tbody tr:last-child td { border-bottom: 0; }
+  .ref-table tbody tr:hover { background: var(--surface-2); }
+  .ref-table tbody tr.hidden { display: none; }
+  .ref-table .fn-name {
+    font-family: 'Consolas', monospace; font-weight: 600;
+    color: var(--primary); direction: ltr; display: inline-block;
+  }
+  .ref-table .js-equiv {
+    font-family: 'Consolas', monospace; color: var(--text);
+    direction: ltr; display: inline-block; background: var(--surface-2);
+    padding: 2px 8px; border-radius: 3px; font-size: 12px;
+  }
+  .ref-cat {
+    display: inline-block; padding: 2px 8px;
+    border-radius: 3px; font-size: 11px; font-weight: 600;
+  }
+  .ref-cat.logic   { background: #fef3c7; color: #92400e; }
+  .ref-cat.math    { background: #dbeafe; color: #1e40af; }
+  .ref-cat.text    { background: #dcfce7; color: #166534; }
+  .ref-cat.count   { background: #fce7f3; color: #9d174d; }
+  .ref-cat.date    { background: #ede9fe; color: #5b21b6; }
+  .ref-cat.lookup  { background: #ffedd5; color: #9a3412; }
+  .ref-cat.check   { background: #e0e7ff; color: #3730a3; }
+
+  footer {
+    margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--border);
+    color: var(--text-mute); font-size: 13px; text-align: center;
+  }
+
+  .toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--text); color: white;
+    padding: 10px 22px; border-radius: 24px;
+    font-size: 13px; box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 100; pointer-events: none;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>محوّل صيغ Excel إلى JavaScript
+      <span class="badge">V2</span>
+      <span class="badge count">39 دالة</span>
+    </h1>
+    <p>
+      أداة محلية بالكامل تحوّل صيغ Excel إلى كود JavaScript جاهز للاستخدام.
+      تشتغل أوفلاين بدون أي اتصال بالإنترنت. تدعم الآن البحث (VLOOKUP)، التواريخ، الفحص، والعد بشروط.
+    </p>
+  </header>
+
+  <div class="status" id="status"></div>
+
+  <div class="main-grid">
+    <div class="panel">
+      <div class="panel-header">
+        <h2>📝 الصيغة (Excel Formula)</h2>
+        <div class="actions">
+          <button class="btn" id="btn-clear" title="مسح الإدخال">
+            <span class="btn-icon">✕</span> مسح
+          </button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="editor-wrap">
+          <div class="editor-highlight" id="editor-highlight" aria-hidden="true"></div>
+          <textarea class="editor-input" id="formula-input"
+            spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"
+            placeholder="=VLOOKUP(A2,B1:D10,3,FALSE)"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2>⚡ كود JavaScript الناتج</h2>
+        <div class="actions">
+          <button class="btn" id="btn-copy" title="نسخ الكود">
+            <span class="btn-icon">📋</span> نسخ
+          </button>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="output-wrap" id="output-wrap">
+          <div class="code-empty">سيظهر الكود هنا بعد التحويل…</div>
+        </div>
+        <div class="output-info" id="output-info" style="display:none"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="convert-bar">
+    <button class="btn btn-primary" id="btn-convert">
+      <span>🔄</span> تحويل إلى JavaScript
+    </button>
+  </div>
+
+  <section class="examples-section">
+    <h2 class="section-title">⚡ أمثلة سريعة</h2>
+    <div class="examples-grid" id="examples-grid"></div>
+  </section>
+
+  <section class="reference-section">
+    <h2 class="section-title">📚 الدوال المدعومة (39 دالة)</h2>
+    <div class="ref-controls" id="ref-controls"></div>
+    <div class="ref-table-wrap">
+      <table class="ref-table">
+        <thead>
+          <tr>
+            <th>الفئة</th>
+            <th>الدالة</th>
+            <th>المكافئ في JavaScript</th>
+            <th>الوصف</th>
+          </tr>
+        </thead>
+        <tbody id="ref-table-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    أداة محلية مستقلة • تعمل بدون إنترنت • النسخة 2.0 • 39 دالة
+  </footer>
+</div>
+
+<div class="toast" id="toast">تم النسخ ✓</div>
+
+<script>
+/* ============================================================================
+                  محوّل صيغ Excel إلى JavaScript - النسخة 2
+   ============================================================================
+   البنية:
+     1. Helpers - دوال runtime مساعدة (تُولّد عند الحاجة فقط)
+     2. القاموس - قائمة الدوال المدعومة (39 دالة)
+     3. Tokenizer - يقسم الصيغة إلى رموز
+     4. Parser - يبني شجرة AST من الرموز
+     5. Generator - يحوّل الـ AST إلى كود JS مع helpers
+     6. الواجهة - الربط مع DOM + التظليل + النسخ
+   ============================================================================ */
+
+/* ============================================================
+   1) قاموس الـ Helpers
+   ============================================================ */
+const HELPERS = {
+  // _matchCriteria: يحاكي شروط COUNTIF مثل ">5", "<>0", "محمد"
+  _matchCriteria: {
+    code: `function _matchCriteria(value, criteria) {
+  if (typeof criteria === 'number') return value === criteria;
+  if (typeof criteria !== 'string') return value === criteria;
+  // فحص العوامل في بداية النص: >=, <=, <>, >, <, =
+  const m = criteria.match(/^(>=|<=|<>|>|<|=)(.*)$/);
+  if (m) {
+    const op = m[1];
+    let val = m[2].trim();
+    const num = Number(val);
+    if (!isNaN(num) && val !== '') val = num;
+    switch (op) {
+      case '>':  return value > val;
+      case '<':  return value < val;
+      case '>=': return value >= val;
+      case '<=': return value <= val;
+      case '<>': return value !== val;
+      case '=':  return value === val;
+    }
+  }
+  return value === criteria;
+}`
+  },
+
+  // _vlookup: البحث العمودي
+  _vlookup: {
+    code: `function _vlookup(lookupValue, table, colIndex, exactMatch) {
+  if (!Array.isArray(table) || table.length === 0) return '#N/A';
+  if (exactMatch === undefined) exactMatch = false;
+  for (const row of table) {
+    if (!Array.isArray(row) || row.length === 0) continue;
+    if (row[0] === lookupValue) return row[colIndex - 1];
+  }
+  return '#N/A';
+}`
+  },
+
+  // _hlookup: البحث الأفقي
+  _hlookup: {
+    code: `function _hlookup(lookupValue, table, rowIndex, exactMatch) {
+  if (!Array.isArray(table) || table.length === 0) return '#N/A';
+  const firstRow = table[0];
+  if (!Array.isArray(firstRow)) return '#N/A';
+  for (let c = 0; c < firstRow.length; c++) {
+    if (firstRow[c] === lookupValue) {
+      const targetRow = table[rowIndex - 1];
+      return targetRow ? targetRow[c] : '#N/A';
+    }
+  }
+  return '#N/A';
+}`
+  },
+
+  // _index: استرجاع قيمة بإحداثيات
+  _index: {
+    code: `function _index(arr, rowNum, colNum) {
+  if (!Array.isArray(arr)) return '#REF!';
+  // 2D matrix
+  if (Array.isArray(arr[0])) {
+    const row = arr[rowNum - 1];
+    if (!row) return '#REF!';
+    if (colNum === undefined || colNum === 0) {
+      // عمود واحد فقط؟ نرجع القيمة المفردة بدل الصف
+      if (row.length === 1) return row[0];
+      return row;
+    }
+    return row[colNum - 1];
+  }
+  // 1D
+  return arr[rowNum - 1];
+}`
+  },
+
+  // _match: البحث عن موضع قيمة
+  _match: {
+    code: `function _match(lookupValue, arr, matchType) {
+  if (matchType === undefined) matchType = 1;
+  arr = Array.isArray(arr) ? arr.flat(Infinity) : [arr];
+  if (matchType === 0) {
+    for (let i = 0; i < arr.length; i++) {
+      if (arr[i] === lookupValue) return i + 1;
+    }
+    return '#N/A';
+  }
+  let lastIdx = -1;
+  for (let i = 0; i < arr.length; i++) {
+    if (matchType === 1 && arr[i] <= lookupValue) lastIdx = i;
+    if (matchType === -1 && arr[i] >= lookupValue) lastIdx = i;
+  }
+  return lastIdx === -1 ? '#N/A' : lastIdx + 1;
+}`
+  },
+
+  // _countif: عدّ بشرط
+  _countif: {
+    deps: ['_matchCriteria'],
+    code: `function _countif(range, criteria) {
+  const arr = Array.isArray(range) ? range.flat(Infinity) : [range];
+  return arr.filter(v => _matchCriteria(v, criteria)).length;
+}`
+  },
+
+  // _countifs: عدّ بشروط متعددة
+  _countifs: {
+    deps: ['_matchCriteria'],
+    code: `function _countifs(...args) {
+  if (args.length < 2 || args.length % 2 !== 0) return 0;
+  const ranges = [], criterias = [];
+  for (let i = 0; i < args.length; i += 2) {
+    const r = Array.isArray(args[i]) ? args[i].flat(Infinity) : [args[i]];
+    ranges.push(r);
+    criterias.push(args[i + 1]);
+  }
+  const len = ranges[0].length;
+  let count = 0;
+  for (let i = 0; i < len; i++) {
+    let matchAll = true;
+    for (let j = 0; j < ranges.length; j++) {
+      if (!_matchCriteria(ranges[j][i], criterias[j])) { matchAll = false; break; }
+    }
+    if (matchAll) count++;
+  }
+  return count;
+}`
+  },
+
+  // _datedif: الفرق بين تاريخين
+  _datedif: {
+    code: `function _datedif(start, end, unit) {
+  const s = start instanceof Date ? start : new Date(start);
+  const e = end instanceof Date ? end : new Date(end);
+  const u = String(unit).toUpperCase();
+  const ms = 1000 * 60 * 60 * 24;
+  switch (u) {
+    case 'D': return Math.floor((e - s) / ms);
+    case 'Y': {
+      let y = e.getFullYear() - s.getFullYear();
+      if (e.getMonth() < s.getMonth() ||
+         (e.getMonth() === s.getMonth() && e.getDate() < s.getDate())) y--;
+      return y;
+    }
+    case 'M': {
+      let m = (e.getFullYear() - s.getFullYear()) * 12 + (e.getMonth() - s.getMonth());
+      if (e.getDate() < s.getDate()) m--;
+      return m;
+    }
+    case 'YM': {
+      let m = e.getMonth() - s.getMonth();
+      if (e.getDate() < s.getDate()) m--;
+      if (m < 0) m += 12;
+      return m;
+    }
+    case 'YD': {
+      const sAdj = new Date(e.getFullYear(), s.getMonth(), s.getDate());
+      if (sAdj > e) sAdj.setFullYear(sAdj.getFullYear() - 1);
+      return Math.floor((e - sAdj) / ms);
+    }
+    case 'MD': {
+      let d = e.getDate() - s.getDate();
+      if (d < 0) {
+        const prevMonth = new Date(e.getFullYear(), e.getMonth(), 0);
+        d += prevMonth.getDate();
+      }
+      return d;
+    }
+    default: return '#NUM!';
+  }
+}`
+  },
+
+  // _edate: إضافة شهور لتاريخ
+  _edate: {
+    code: `function _edate(start, months) {
+  const d = start instanceof Date ? new Date(start.getTime()) : new Date(start);
+  const targetMonth = d.getMonth() + Number(months);
+  const result = new Date(d.getFullYear(), targetMonth, d.getDate());
+  // معالجة نهاية الشهر (مثلاً 31 يناير + شهر = 28/29 فبراير)
+  if (result.getDate() !== d.getDate()) result.setDate(0);
+  return result;
+}`
+  },
+
+  // _isError: فحص قيم الخطأ
+  _isError: {
+    code: `function _isError(value) {
+  const errStrings = ['#N/A', '#REF!', '#NUM!', '#VALUE!', '#DIV/0!', '#NAME?'];
+  if (typeof value === 'string' && errStrings.includes(value)) return true;
+  if (value instanceof Error) return true;
+  if (typeof value === 'number' && (isNaN(value) || !isFinite(value))) return true;
+  return false;
+}`
+  }
+};
+
+/* ============================================================
+   2) قاموس الدوال (39 دالة)
+   ============================================================ */
+const FUNCTIONS = {
+  // ===== المنطقية =====
+  IF: {
+    cat: 'logic', desc: 'شرط: ترجع القيمة الأولى لو الشرط صحيح، وإلا الثانية',
+    jsEquiv: 'cond ? a : b',
+    generator: (args) => {
+      if (args.length < 2) throw new Error('IF يحتاج شرطاً وقيمة على الأقل');
+      const [cond, a, b] = args;
+      return `(${cond} ? ${a} : ${b !== undefined ? b : 'false'})`;
+    }
+  },
+  AND: {
+    cat: 'logic', desc: 'يرجع true لو كل الشروط صحيحة',
+    jsEquiv: 'a && b && ...',
+    generator: (args) => `(${args.join(' && ')})`
+  },
+  OR: {
+    cat: 'logic', desc: 'يرجع true لو أحد الشروط صحيح',
+    jsEquiv: 'a || b || ...',
+    generator: (args) => `(${args.join(' || ')})`
+  },
+  NOT: {
+    cat: 'logic', desc: 'يعكس قيمة منطقية',
+    jsEquiv: '!a',
+    generator: (args) => `(!${args[0]})`
+  },
+  IFERROR: {
+    cat: 'logic', desc: 'يرجع قيمة بديلة لو حصل خطأ',
+    jsEquiv: 'try { a } catch { b }',
+    usesHelpers: ['_isError'],
+    generator: (args) => {
+      const [val, fallback] = args;
+      // نفحص الخطأ بطريقتين: try/catch (للأخطاء الفعلية) + _isError (لقيم #N/A النصية)
+      return `((()=>{try{const _v=${val};return _isError(_v)?${fallback}:_v;}catch(e){return ${fallback};}})())`;
+    }
+  },
+
+  // ===== الرياضية =====
+  SUM: {
+    cat: 'math', desc: 'مجموع الأرقام',
+    jsEquiv: 'arr.reduce((a,b)=>a+b,0)',
+    generator: (args) => `[${args.join(', ')}].flat(Infinity).reduce((a,b)=>a+(Number(b)||0),0)`
+  },
+  AVERAGE: {
+    cat: 'math', desc: 'المتوسط الحسابي',
+    jsEquiv: 'sum / count',
+    generator: (args) => `(()=>{const _a=[${args.join(', ')}].flat(Infinity).filter(v=>typeof v==='number'&&!isNaN(v));return _a.length?_a.reduce((a,b)=>a+b,0)/_a.length:0;})()`
+  },
+  MIN: {
+    cat: 'math', desc: 'أصغر قيمة',
+    jsEquiv: 'Math.min(...arr)',
+    generator: (args) => `Math.min(...[${args.join(', ')}].flat(Infinity).filter(v=>typeof v==='number'))`
+  },
+  MAX: {
+    cat: 'math', desc: 'أكبر قيمة',
+    jsEquiv: 'Math.max(...arr)',
+    generator: (args) => `Math.max(...[${args.join(', ')}].flat(Infinity).filter(v=>typeof v==='number'))`
+  },
+  ROUND: {
+    cat: 'math', desc: 'تقريب رقم لعدد محدد من المنازل',
+    jsEquiv: 'Math.round(n * 10^d) / 10^d',
+    generator: (args) => {
+      const [num, digits] = args;
+      const d = digits !== undefined ? digits : '0';
+      return `(Math.round(${num} * Math.pow(10, ${d})) / Math.pow(10, ${d}))`;
+    }
+  },
+  ABS: {
+    cat: 'math', desc: 'القيمة المطلقة',
+    jsEquiv: 'Math.abs(n)',
+    generator: (args) => `Math.abs(${args[0]})`
+  },
+  POWER: {
+    cat: 'math', desc: 'رفع رقم لقوة',
+    jsEquiv: 'Math.pow(a, b)',
+    generator: (args) => {
+      if (args.length < 2) throw new Error('POWER يحتاج عددين');
+      return `Math.pow(${args[0]}, ${args[1]})`;
+    }
+  },
+  SQRT: {
+    cat: 'math', desc: 'الجذر التربيعي',
+    jsEquiv: 'Math.sqrt(n)',
+    generator: (args) => `Math.sqrt(${args[0]})`
+  },
+  MOD: {
+    cat: 'math', desc: 'باقي القسمة',
+    jsEquiv: 'a % b',
+    generator: (args) => {
+      if (args.length < 2) throw new Error('MOD يحتاج عددين');
+      return `((${args[0]}) % (${args[1]}))`;
+    }
+  },
+
+  // ===== النصية =====
+  CONCATENATE: {
+    cat: 'text', desc: 'دمج عدة نصوص',
+    jsEquiv: 'a + b + ...',
+    generator: (args) => `[${args.join(', ')}].map(String).join('')`
+  },
+  LEFT: {
+    cat: 'text', desc: 'يأخذ أحرف من اليسار',
+    jsEquiv: 'str.slice(0, n)',
+    generator: (args) => {
+      const [str, n] = args;
+      return `String(${str}).slice(0, ${n !== undefined ? n : '1'})`;
+    }
+  },
+  RIGHT: {
+    cat: 'text', desc: 'يأخذ أحرف من اليمين',
+    jsEquiv: 'str.slice(-n)',
+    generator: (args) => {
+      const [str, n] = args;
+      const len = n !== undefined ? n : '1';
+      return `String(${str}).slice(-(${len}))`;
+    }
+  },
+  MID: {
+    cat: 'text', desc: 'استخراج جزء من نص',
+    jsEquiv: 'str.substr(start-1, len)',
+    generator: (args) => {
+      if (args.length < 3) throw new Error('MID يحتاج 3 وسائط');
+      const [str, start, len] = args;
+      return `String(${str}).substr((${start}) - 1, ${len})`;
+    }
+  },
+  LEN: {
+    cat: 'text', desc: 'طول النص',
+    jsEquiv: 'str.length',
+    generator: (args) => `String(${args[0]}).length`
+  },
+  TRIM: {
+    cat: 'text', desc: 'إزالة المسافات الزائدة',
+    jsEquiv: 'str.trim()',
+    generator: (args) => `String(${args[0]}).trim()`
+  },
+  UPPER: {
+    cat: 'text', desc: 'تحويل لأحرف كبيرة',
+    jsEquiv: 'str.toUpperCase()',
+    generator: (args) => `String(${args[0]}).toUpperCase()`
+  },
+  LOWER: {
+    cat: 'text', desc: 'تحويل لأحرف صغيرة',
+    jsEquiv: 'str.toLowerCase()',
+    generator: (args) => `String(${args[0]}).toLowerCase()`
+  },
+  REPLACE: {
+    cat: 'text', desc: 'استبدال جزء من نص بالموقع',
+    jsEquiv: 'str.slice + new + str.slice',
+    generator: (args) => {
+      if (args.length < 4) throw new Error('REPLACE يحتاج 4 وسائط');
+      const [str, start, num, newStr] = args;
+      return `(()=>{const _s=String(${str});return _s.slice(0,(${start})-1)+String(${newStr})+_s.slice((${start})-1+(${num}));})()`;
+    }
+  },
+  SUBSTITUTE: {
+    cat: 'text', desc: 'استبدال نص بنص آخر',
+    jsEquiv: 'str.replaceAll(old, new)',
+    generator: (args) => {
+      if (args.length < 3) throw new Error('SUBSTITUTE يحتاج 3 وسائط على الأقل');
+      const [str, oldText, newText, instance] = args;
+      if (instance === undefined) {
+        // استبدال الكل (split + join لتفادي مشاكل regex مع الرموز الخاصة)
+        return `String(${str}).split(String(${oldText})).join(String(${newText}))`;
+      }
+      // استبدال نسخة محددة (instance رقم 1-based)
+      return `(()=>{const _s=String(${str}),_o=String(${oldText}),_n=String(${newText}),_i=${instance};let _c=0,_p=0,_idx;while((_idx=_s.indexOf(_o,_p))!==-1){_c++;if(_c===_i){return _s.slice(0,_idx)+_n+_s.slice(_idx+_o.length);}_p=_idx+_o.length;}return _s;})()`;
+    }
+  },
+
+  // ===== العد =====
+  COUNT: {
+    cat: 'count', desc: 'عدّ الأرقام فقط',
+    jsEquiv: 'arr.filter(isNumber).length',
+    generator: (args) => `[${args.join(', ')}].flat(Infinity).filter(v=>typeof v==='number'&&!isNaN(v)).length`
+  },
+  COUNTA: {
+    cat: 'count', desc: 'عدّ الخلايا غير الفارغة',
+    jsEquiv: 'arr.filter(notEmpty).length',
+    generator: (args) => `[${args.join(', ')}].flat(Infinity).filter(v=>v!==null&&v!==undefined&&v!=='').length`
+  },
+  COUNTIF: {
+    cat: 'count', desc: 'عدّ بشرط',
+    jsEquiv: '_countif(range, criteria)',
+    usesHelpers: ['_countif'],
+    generator: (args) => {
+      if (args.length < 2) throw new Error('COUNTIF يحتاج نطاقاً وشرطاً');
+      return `_countif(${args[0]}, ${args[1]})`;
+    }
+  },
+  COUNTIFS: {
+    cat: 'count', desc: 'عدّ بشروط متعددة',
+    jsEquiv: '_countifs(r1,c1,r2,c2,...)',
+    usesHelpers: ['_countifs'],
+    generator: (args) => {
+      if (args.length < 2 || args.length % 2 !== 0) throw new Error('COUNTIFS يحتاج أزواجاً من نطاق وشرط');
+      return `_countifs(${args.join(', ')})`;
+    }
+  },
+
+  // ===== البحث =====
+  VLOOKUP: {
+    cat: 'lookup', desc: 'البحث العمودي في جدول',
+    jsEquiv: '_vlookup(val, table, col, exact)',
+    usesHelpers: ['_vlookup'],
+    matrixArgs: [1], // الوسيط الثاني (table) لازم يكون 2D matrix
+    generator: (args) => {
+      if (args.length < 3) throw new Error('VLOOKUP يحتاج 3 وسائط على الأقل');
+      const [val, table, col, exact] = args;
+      // FALSE في Excel = exact match
+      const exactExpr = exact !== undefined ? `(${exact} === false || ${exact} === 0)` : 'true';
+      return `_vlookup(${val}, ${table}, ${col}, ${exactExpr})`;
+    }
+  },
+  HLOOKUP: {
+    cat: 'lookup', desc: 'البحث الأفقي في جدول',
+    jsEquiv: '_hlookup(val, table, row, exact)',
+    usesHelpers: ['_hlookup'],
+    matrixArgs: [1],
+    generator: (args) => {
+      if (args.length < 3) throw new Error('HLOOKUP يحتاج 3 وسائط على الأقل');
+      const [val, table, row, exact] = args;
+      const exactExpr = exact !== undefined ? `(${exact} === false || ${exact} === 0)` : 'true';
+      return `_hlookup(${val}, ${table}, ${row}, ${exactExpr})`;
+    }
+  },
+  INDEX: {
+    cat: 'lookup', desc: 'استرجاع قيمة من مصفوفة بإحداثيات',
+    jsEquiv: '_index(arr, row, col)',
+    usesHelpers: ['_index'],
+    matrixArgs: [0],
+    generator: (args) => {
+      if (args.length < 2) throw new Error('INDEX يحتاج وسيطين على الأقل');
+      const [arr, row, col] = args;
+      return `_index(${arr}, ${row}, ${col !== undefined ? col : 'undefined'})`;
+    }
+  },
+  MATCH: {
+    cat: 'lookup', desc: 'البحث عن موضع قيمة في مصفوفة',
+    jsEquiv: '_match(val, arr, type)',
+    usesHelpers: ['_match'],
+    generator: (args) => {
+      if (args.length < 2) throw new Error('MATCH يحتاج وسيطين على الأقل');
+      const [val, arr, type] = args;
+      return `_match(${val}, ${arr}, ${type !== undefined ? type : '1'})`;
+    }
+  },
+
+  // ===== التواريخ =====
+  TODAY: {
+    cat: 'date', desc: 'تاريخ اليوم (بدون وقت)',
+    jsEquiv: 'new Date()',
+    generator: (args) => `(()=>{const d=new Date();d.setHours(0,0,0,0);return d;})()`
+  },
+  NOW: {
+    cat: 'date', desc: 'التاريخ والوقت الحاليين',
+    jsEquiv: 'new Date()',
+    generator: (args) => `new Date()`
+  },
+  YEAR: {
+    cat: 'date', desc: 'السنة من تاريخ',
+    jsEquiv: 'date.getFullYear()',
+    generator: (args) => `(${args[0]} instanceof Date ? ${args[0]} : new Date(${args[0]})).getFullYear()`
+  },
+  MONTH: {
+    cat: 'date', desc: 'الشهر من تاريخ (1-12)',
+    jsEquiv: 'date.getMonth() + 1',
+    generator: (args) => `((${args[0]} instanceof Date ? ${args[0]} : new Date(${args[0]})).getMonth() + 1)`
+  },
+  DAY: {
+    cat: 'date', desc: 'اليوم من تاريخ (1-31)',
+    jsEquiv: 'date.getDate()',
+    generator: (args) => `(${args[0]} instanceof Date ? ${args[0]} : new Date(${args[0]})).getDate()`
+  },
+  DATE: {
+    cat: 'date', desc: 'إنشاء تاريخ من سنة وشهر ويوم',
+    jsEquiv: 'new Date(y, m-1, d)',
+    generator: (args) => {
+      if (args.length < 3) throw new Error('DATE يحتاج 3 وسائط: سنة، شهر، يوم');
+      const [y, m, d] = args;
+      // الشهر في JS: 0-based (يناير = 0)
+      return `new Date(${y}, (${m}) - 1, ${d})`;
+    }
+  },
+  EDATE: {
+    cat: 'date', desc: 'إضافة شهور لتاريخ',
+    jsEquiv: '_edate(date, months)',
+    usesHelpers: ['_edate'],
+    generator: (args) => {
+      if (args.length < 2) throw new Error('EDATE يحتاج وسيطين: تاريخ وعدد شهور');
+      return `_edate(${args[0]}, ${args[1]})`;
+    }
+  },
+  DATEDIF: {
+    cat: 'date', desc: 'الفرق بين تاريخين (Y/M/D/YM/YD/MD)',
+    jsEquiv: '_datedif(start, end, unit)',
+    usesHelpers: ['_datedif'],
+    generator: (args) => {
+      if (args.length < 3) throw new Error('DATEDIF يحتاج 3 وسائط: بداية، نهاية، وحدة');
+      return `_datedif(${args[0]}, ${args[1]}, ${args[2]})`;
+    }
+  },
+
+  // ===== الفحص =====
+  ISBLANK: {
+    cat: 'check', desc: 'فحص هل الخلية فارغة',
+    jsEquiv: 'v == null || v === ""',
+    generator: (args) => `(${args[0]} === null || ${args[0]} === undefined || ${args[0]} === '')`
+  },
+  ISNUMBER: {
+    cat: 'check', desc: 'فحص هل القيمة رقم',
+    jsEquiv: 'typeof v === "number"',
+    generator: (args) => `(typeof ${args[0]} === 'number' && !isNaN(${args[0]}))`
+  },
+  ISTEXT: {
+    cat: 'check', desc: 'فحص هل القيمة نص',
+    jsEquiv: 'typeof v === "string"',
+    generator: (args) => `(typeof ${args[0]} === 'string')`
+  },
+  ISERROR: {
+    cat: 'check', desc: 'فحص هل القيمة خطأ',
+    jsEquiv: '_isError(v)',
+    usesHelpers: ['_isError'],
+    generator: (args) => `_isError(${args[0]})`
+  }
+};
+
+/* ============================================================
+   3) Tokenizer
+   ============================================================ */
+function tokenize(input) {
+  const tokens = [];
+  let pos = 0;
+  let src = input;
+  let offset = 0;
+  if (src.startsWith('=')) { offset = 1; src = src.slice(1); }
+
+  const patterns = [
+    [/^\s+/,                                  null],
+    [/^"((?:[^"\\]|\\.|"")*)"/,               'STRING'],
+    [/^(TRUE|FALSE)\b/i,                      'BOOLEAN'],
+    [/^[A-Za-z_][A-Za-z0-9_\.]*(?=\s*\()/,    'FUNCTION'],
+    [/^\$?[A-Za-z]+\$?\d+:\$?[A-Za-z]+\$?\d+/, 'RANGE'],
+    // عمود كامل (B:C) - نلتقطه علشان نرفضه برسالة واضحة
+    [/^\$?[A-Za-z]+:\$?[A-Za-z]+(?![A-Za-z0-9])/, 'FULL_COLUMN'],
+    [/^\$?[A-Za-z]+\$?\d+/,                   'CELL_REF'],
+    [/^\d+\.?\d*/,                            'NUMBER'],
+    [/^\.\d+/,                                'NUMBER'],
+    [/^(<=|>=|<>|=|<|>)/,                     'OPERATOR_CMP'],
+    [/^[+\-*/%^&]/,                           'OPERATOR'],
+    [/^[,;]/,                                 'COMMA'],
+    [/^\(/,                                   'LPAREN'],
+    [/^\)/,                                   'RPAREN']
+  ];
+
+  while (pos < src.length) {
+    let matched = false;
+    for (const [regex, type] of patterns) {
+      const m = src.slice(pos).match(regex);
+      if (!m) continue;
+
+      const start = pos + offset;
+      const end = pos + m[0].length + offset;
+
+      // نرفض الأعمدة الكاملة (B:C) فوراً مع رسالة واضحة
+      if (type === 'FULL_COLUMN') {
+        const parts = m[0].split(':');
+        const err = new Error(`النطاقات بدون أرقام صفوف غير مدعومة: "${m[0]}". استخدم شكل مثل "${parts[0]}1:${parts[1]}100" بدلاً منها.`);
+        err.start = start; err.end = end;
+        throw err;
+      }
+
+      if (type !== null) {
+        tokens.push({
+          type,
+          value: type === 'STRING' ? m[1] : m[0],
+          raw: m[0],
+          start, end
+        });
+      }
+      pos += m[0].length;
+      matched = true;
+      break;
+    }
+
+    if (!matched) {
+      const err = new Error(`رمز غير متوقع: "${src[pos]}"`);
+      err.start = pos + offset;
+      err.end = pos + offset + 1;
+      throw err;
+    }
+  }
+  return tokens;
+}
+
+/* ============================================================
+   4) Parser - يبني AST بـ Recursive Descent
+   ============================================================ */
+function parse(tokens) {
+  let i = 0;
+  const peek = () => tokens[i];
+  const eat = (expectedType) => {
+    const t = tokens[i];
+    if (!t) {
+      const err = new Error('انتهت الصيغة فجأة - فيه ناقص');
+      err.start = tokens[tokens.length - 1]?.end ?? 0;
+      err.end = err.start + 1;
+      throw err;
+    }
+    if (expectedType && t.type !== expectedType) {
+      const err = new Error(`متوقع ${expectedType} لكن وُجد ${t.type} ("${t.raw}")`);
+      err.start = t.start; err.end = t.end;
+      throw err;
+    }
+    i++;
+    return t;
+  };
+
+  function parseComparison() {
+    let left = parseConcat();
+    while (peek() && peek().type === 'OPERATOR_CMP') {
+      const op = eat().value;
+      const right = parseConcat();
+      left = { type: 'Binary', op, left, right };
+    }
+    return left;
+  }
+  function parseConcat() {
+    let left = parseAddSub();
+    while (peek() && peek().type === 'OPERATOR' && peek().value === '&') {
+      eat();
+      const right = parseAddSub();
+      left = { type: 'Binary', op: '&', left, right };
+    }
+    return left;
+  }
+  function parseAddSub() {
+    let left = parseMulDiv();
+    while (peek() && peek().type === 'OPERATOR' && (peek().value === '+' || peek().value === '-')) {
+      const op = eat().value;
+      const right = parseMulDiv();
+      left = { type: 'Binary', op, left, right };
+    }
+    return left;
+  }
+  function parseMulDiv() {
+    let left = parsePower();
+    while (peek() && peek().type === 'OPERATOR' && (peek().value === '*' || peek().value === '/' || peek().value === '%')) {
+      const op = eat().value;
+      const right = parsePower();
+      left = { type: 'Binary', op, left, right };
+    }
+    return left;
+  }
+  function parsePower() {
+    let left = parseUnary();
+    while (peek() && peek().type === 'OPERATOR' && peek().value === '^') {
+      eat();
+      const right = parseUnary();
+      left = { type: 'Binary', op: '^', left, right };
+    }
+    return left;
+  }
+  function parseUnary() {
+    if (peek() && peek().type === 'OPERATOR' && (peek().value === '-' || peek().value === '+')) {
+      const op = eat().value;
+      const arg = parseUnary();
+      return { type: 'Unary', op, arg };
+    }
+    return parsePrimary();
+  }
+  function parsePrimary() {
+    const t = peek();
+    if (!t) {
+      const err = new Error('متوقع تعبير لكن انتهت الصيغة');
+      err.start = tokens[tokens.length - 1]?.end ?? 0;
+      err.end = err.start + 1;
+      throw err;
+    }
+
+    if (t.type === 'NUMBER')  { eat(); return { type: 'Number', value: parseFloat(t.value) }; }
+    if (t.type === 'STRING')  {
+      eat();
+      const unescaped = t.value.replace(/""/g, '"');
+      return { type: 'String', value: unescaped };
+    }
+    if (t.type === 'BOOLEAN') { eat(); return { type: 'Boolean', value: t.value.toUpperCase() === 'TRUE' }; }
+    if (t.type === 'CELL_REF'){ eat(); return { type: 'CellRef', name: t.value.replace(/\$/g, '') }; }
+    if (t.type === 'RANGE')   {
+      eat();
+      const [s, e] = t.value.replace(/\$/g, '').split(':');
+      return { type: 'Range', start: s, end: e };
+    }
+    if (t.type === 'FUNCTION') {
+      const fnTok = eat();
+      eat('LPAREN');
+      const args = [];
+      if (peek() && peek().type !== 'RPAREN') {
+        args.push(parseComparison());
+        while (peek() && peek().type === 'COMMA') {
+          eat();
+          args.push(parseComparison());
+        }
+      }
+      const closing = eat('RPAREN');
+      return {
+        type: 'Call',
+        name: fnTok.value.toUpperCase(),
+        args, start: fnTok.start, end: closing.end
+      };
+    }
+    if (t.type === 'LPAREN') {
+      eat();
+      const expr = parseComparison();
+      eat('RPAREN');
+      return expr;
+    }
+
+    const err = new Error(`رمز غير متوقع: "${t.raw}"`);
+    err.start = t.start; err.end = t.end;
+    throw err;
+  }
+
+  const ast = parseComparison();
+  if (i < tokens.length) {
+    const t = tokens[i];
+    const err = new Error(`رمز إضافي غير متوقع: "${t.raw}"`);
+    err.start = t.start; err.end = t.end;
+    throw err;
+  }
+  return ast;
+}
+
+/* ============================================================
+   5) Code Generator
+   ============================================================ */
+function generate(ast) {
+  const usedCells = new Set();
+  const usedHelpers = new Set();
+
+  const cellVar = (name) => {
+    const v = name.toLowerCase();
+    usedCells.add(v);
+    return v;
+  };
+
+  const colToNum = (c) => {
+    let n = 0;
+    for (const ch of c.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+    return n;
+  };
+  const numToCol = (n) => {
+    let s = '';
+    while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+    return s;
+  };
+
+  // فك نطاق إلى مصفوفة 2D من أسماء الخلايا
+  function expandRangeToMatrix(start, end) {
+    const m1 = start.match(/^([A-Za-z]+)(\d+)$/);
+    const m2 = end.match(/^([A-Za-z]+)(\d+)$/);
+    if (!m1 || !m2) throw new Error(`نطاق غير صالح: ${start}:${end}`);
+
+    const c1 = colToNum(m1[1]), c2 = colToNum(m2[1]);
+    const r1 = parseInt(m1[2]), r2 = parseInt(m2[2]);
+    const cMin = Math.min(c1, c2), cMax = Math.max(c1, c2);
+    const rMin = Math.min(r1, r2), rMax = Math.max(r1, r2);
+    const rows = rMax - rMin + 1;
+    const cols = cMax - cMin + 1;
+
+    if (rows * cols > 1000) {
+      throw new Error(`النطاق كبير جداً (${rows * cols} خلية). الحد الأقصى 1000.`);
+    }
+
+    const matrix = [];
+    for (let r = rMin; r <= rMax; r++) {
+      const row = [];
+      for (let c = cMin; c <= cMax; c++) {
+        row.push(cellVar(numToCol(c) + r));
+      }
+      matrix.push(row);
+    }
+    return { matrix, rows, cols };
+  }
+
+  const opMap = {
+    '=':  '===', '<>': '!==',
+    '<':  '<', '>': '>', '<=': '<=', '>=': '>=',
+    '+':  '+', '-': '-', '*': '*', '/': '/', '%': '%'
+  };
+
+  function registerHelper(name) {
+    if (usedHelpers.has(name)) return;
+    usedHelpers.add(name);
+    const h = HELPERS[name];
+    if (h && h.deps) {
+      for (const d of h.deps) registerHelper(d);
+    }
+  }
+
+  // gen: opts.needsMatrix يخبر إذا الوسيط الحالي يحتاج 2D matrix
+  function gen(node, opts = {}) {
+    const needsMatrix = opts.needsMatrix === true;
+
+    switch (node.type) {
+      case 'Number':  return String(node.value);
+      case 'String':  return JSON.stringify(node.value);
+      case 'Boolean': return node.value ? 'true' : 'false';
+      case 'CellRef': return cellVar(node.name);
+
+      case 'Range': {
+        const { matrix } = expandRangeToMatrix(node.start, node.end);
+        if (needsMatrix) {
+          // 2D: [[a1,b1],[a2,b2],...] للـ VLOOKUP/INDEX
+          const rowStrs = matrix.map(row => `[${row.join(', ')}]`);
+          return `[${rowStrs.join(', ')}]`;
+        }
+        // 1D مسطّح للـ SUM/AVERAGE/COUNT/إلخ
+        return `[${matrix.flat().join(', ')}]`;
+      }
+
+      case 'Unary':
+        return `(${node.op}${gen(node.arg)})`;
+
+      case 'Binary': {
+        const L = gen(node.left);
+        const R = gen(node.right);
+        if (node.op === '&') return `(String(${L}) + String(${R}))`;
+        if (node.op === '^') return `Math.pow(${L}, ${R})`;
+        return `(${L} ${opMap[node.op]} ${R})`;
+      }
+
+      case 'Call': {
+        const fn = FUNCTIONS[node.name];
+        if (!fn) {
+          const err = new Error(`الدالة "${node.name}" غير مدعومة في النسخة الحالية`);
+          err.start = node.start; err.end = node.end;
+          err.unsupported = node.name;
+          throw err;
+        }
+
+        // سجل الـ helpers (مع التبعيات)
+        if (fn.usesHelpers) {
+          for (const h of fn.usesHelpers) registerHelper(h);
+        }
+
+        // ولّد الوسائط مع مراعاة الحاجة لـ 2D
+        const matrixArgs = fn.matrixArgs || [];
+        const compiledArgs = node.args.map((a, idx) =>
+          gen(a, { needsMatrix: matrixArgs.includes(idx) })
+        );
+
+        try {
+          return fn.generator(compiledArgs);
+        } catch (e) {
+          const err = new Error(`خطأ في دالة ${node.name}: ${e.message}`);
+          err.start = node.start; err.end = node.end;
+          throw err;
+        }
+      }
+
+      default:
+        throw new Error(`عقدة AST غير معروفة: ${node.type}`);
+    }
+  }
+
+  const expr = gen(ast);
+
+  // ترتيب topological للـ helpers (التبعيات تجي أولاً)
+  const helperOrder = [];
+  const visited = new Set();
+  function topoVisit(name) {
+    if (visited.has(name)) return;
+    visited.add(name);
+    const h = HELPERS[name];
+    if (h && h.deps) for (const d of h.deps) topoVisit(d);
+    helperOrder.push(name);
+  }
+  for (const h of usedHelpers) topoVisit(h);
+
+  return {
+    expr,
+    usedCells: [...usedCells].sort(naturalSort),
+    usedHelpers: helperOrder
+  };
+}
+
+// ترتيب طبيعي للخلايا: a1, a2, ..., a10 (ليس a1, a10, a2)
+function naturalSort(a, b) {
+  const re = /([a-z]+)(\d+)/i;
+  const ma = a.match(re), mb = b.match(re);
+  if (ma && mb) {
+    if (ma[1] !== mb[1]) return ma[1].localeCompare(mb[1]);
+    return parseInt(ma[2]) - parseInt(mb[2]);
+  }
+  return a.localeCompare(b);
+}
+
+/* ============================================================
+   6) واجهة المحوّل الرئيسية
+   ============================================================ */
+function convertFormula(input) {
+  if (!input || !input.trim()) {
+    throw Object.assign(new Error('الصيغة فارغة'), { start: 0, end: 0 });
+  }
+  const tokens = tokenize(input);
+  if (tokens.length === 0) {
+    throw Object.assign(new Error('لا توجد رموز قابلة للتحليل'), { start: 0, end: input.length });
+  }
+  const ast = parse(tokens);
+  const { expr, usedCells, usedHelpers } = generate(ast);
+
+  // بناء الكود النهائي
+  const lines = [];
+  if (usedHelpers.length > 0) {
+    lines.push(`// ===== Helpers مساعدة =====`);
+    for (const name of usedHelpers) {
+      lines.push(HELPERS[name].code);
+      lines.push('');
+    }
+    lines.push(`// ===== الدالة الرئيسية =====`);
+  }
+  const params = usedCells.length ? usedCells.join(', ') : '';
+  lines.push(`// دالة محوّلة من صيغة Excel`);
+  lines.push(`// المُدخلات المطلوبة: ${usedCells.length ? usedCells.join(', ') : '(لا شيء)'}`);
+  lines.push(`function calculate(${params}) {`);
+  lines.push(`  return ${expr};`);
+  lines.push(`}`);
+
+  return { code: lines.join('\n'), usedCells, usedHelpers };
+}
+
+/* ============================================================================
+                                واجهة المستخدم
+   ============================================================================ */
+
+const $input        = document.getElementById('formula-input');
+const $highlight    = document.getElementById('editor-highlight');
+const $output       = document.getElementById('output-wrap');
+const $outputInfo   = document.getElementById('output-info');
+const $status       = document.getElementById('status');
+const $btnConvert   = document.getElementById('btn-convert');
+const $btnCopy      = document.getElementById('btn-copy');
+const $btnClear     = document.getElementById('btn-clear');
+const $toast        = document.getElementById('toast');
+
+let lastCode = '';
+
+const CAT_LABELS = {
+  logic: 'منطقية', math: 'رياضية', text: 'نصية',
+  count: 'عدّ', date: 'تاريخ', lookup: 'بحث', check: 'فحص'
+};
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function renderHighlight(input, errorRange = null) {
+  if (!input) { $highlight.innerHTML = ''; return; }
+  if (errorRange) {
+    const { start, end } = errorRange;
+    const before = input.slice(0, start);
+    const errPart = input.slice(start, Math.max(end, start + 1));
+    const after = input.slice(Math.max(end, start + 1));
+    $highlight.innerHTML =
+      escapeHtml(before) +
+      `<span class="err-mark">${escapeHtml(errPart) || '⚠'}</span>` +
+      escapeHtml(after);
+    return;
+  }
+
+  try {
+    const tokens = tokenize(input);
+    let html = '';
+    let cursor = 0;
+    if (input.startsWith('=')) {
+      html += `<span class="tk-op">=</span>`;
+      cursor = 1;
+    }
+    for (const t of tokens) {
+      if (t.start > cursor) {
+        html += escapeHtml(input.slice(cursor, t.start));
+      }
+      const cls = {
+        FUNCTION: 'tk-fn', NUMBER: 'tk-num', STRING: 'tk-str',
+        CELL_REF: 'tk-cell', RANGE: 'tk-cell',
+        OPERATOR: 'tk-op', OPERATOR_CMP: 'tk-op',
+        COMMA: 'tk-op', LPAREN: 'tk-paren', RPAREN: 'tk-paren',
+        BOOLEAN: 'tk-num'
+      }[t.type] || '';
+      html += `<span class="${cls}">${escapeHtml(t.raw)}</span>`;
+      cursor = t.end;
+    }
+    if (cursor < input.length) html += escapeHtml(input.slice(cursor));
+    $highlight.innerHTML = html;
+  } catch {
+    $highlight.innerHTML = escapeHtml(input);
+  }
+}
+
+function highlightJS(code) {
+  let result = escapeHtml(code);
+  result = result.replace(/(\/\/[^\n]*)/g, '<span class="code-comment">$1</span>');
+  result = result.replace(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g, (match) => {
+    if (match.includes('code-comment')) return match;
+    return `<span class="code-string">${match}</span>`;
+  });
+  result = result.replace(
+    /\b(function|return|const|let|var|if|else|for|while|switch|case|break|default|try|catch|throw|new|typeof|true|false|null|undefined)\b/g,
+    '<span class="code-keyword">$1</span>'
+  );
+  result = result.replace(/\b(\d+\.?\d*)\b/g, '<span class="code-number">$1</span>');
+  result = result.replace(
+    /\b(Math|Number|String|Array|Date|Object|JSON|isNaN|isFinite)\b/g,
+    '<span class="code-fn">$1</span>'
+  );
+  return result;
+}
+
+function showOutput(code) {
+  if (!code) {
+    $output.innerHTML = '<div class="code-empty">سيظهر الكود هنا بعد التحويل…</div>';
+    $outputInfo.style.display = 'none';
+    return;
+  }
+  const lines = code.split('\n');
+  const lineNumbers = lines.map((_, i) => `<div>${i + 1}</div>`).join('');
+  const highlighted = highlightJS(code);
+  $output.innerHTML = `
+    <div class="code-block">
+      <div class="line-numbers">${lineNumbers}</div>
+      <div class="code-content">${highlighted}</div>
+    </div>
+  `;
+}
+
+function showOutputInfo(usedCells, usedHelpers) {
+  const items = [];
+  items.push(`<span class="info-item">📥 الباراميترات: <code>${usedCells.length ? usedCells.join(', ') : '(لا شيء)'}</code></span>`);
+  if (usedHelpers && usedHelpers.length > 0) {
+    items.push(`<span class="info-item">🔧 Helpers مولّدة: <code>${usedHelpers.join(', ')}</code></span>`);
+  }
+  $outputInfo.innerHTML = items.join('');
+  $outputInfo.style.display = 'flex';
+}
+
+function showStatus(type, html) {
+  $status.className = `status show ${type}`;
+  $status.innerHTML = html;
+}
+function hideStatus() {
+  $status.className = 'status';
+  $status.innerHTML = '';
+}
+
+function doConvert() {
+  const input = $input.value;
+  hideStatus();
+  renderHighlight(input);
+
+  try {
+    const { code, usedCells, usedHelpers } = convertFormula(input);
+    lastCode = code;
+    showOutput(code);
+    showOutputInfo(usedCells, usedHelpers);
+    let msg = `<strong>✓ نجح التحويل.</strong> الدالة <code>calculate</code> جاهزة.`;
+    if (usedHelpers.length > 0) msg += ` (مع ${usedHelpers.length} helpers)`;
+    showStatus('success', msg);
+  } catch (e) {
+    lastCode = '';
+    showOutput('');
+    if (typeof e.start === 'number') {
+      renderHighlight(input, { start: e.start, end: e.end || e.start + 1 });
+    }
+    let msg = `<strong>✗ خطأ:</strong> ${escapeHtml(e.message)}`;
+    if (e.unsupported) {
+      msg += `<br><small>الدوال المدعومة: ${Object.keys(FUNCTIONS).join('، ')}</small>`;
+    }
+    showStatus('error', msg);
+  }
+}
+
+function showToast(text) {
+  $toast.textContent = text;
+  $toast.classList.add('show');
+  setTimeout(() => $toast.classList.remove('show'), 1800);
+}
+
+async function copyCode() {
+  if (!lastCode) { showToast('لا يوجد كود لنسخه'); return; }
+  try {
+    await navigator.clipboard.writeText(lastCode);
+    showToast('تم النسخ ✓');
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = lastCode;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('تم النسخ ✓');
+  }
+}
+
+$btnConvert.addEventListener('click', doConvert);
+$btnCopy.addEventListener('click', copyCode);
+$btnClear.addEventListener('click', () => {
+  $input.value = '';
+  renderHighlight('');
+  showOutput('');
+  hideStatus();
+  $input.focus();
+});
+$input.addEventListener('input', () => renderHighlight($input.value));
+$input.addEventListener('scroll', () => {
+  $highlight.scrollTop = $input.scrollTop;
+  $highlight.scrollLeft = $input.scrollLeft;
+});
+$input.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    e.preventDefault();
+    doConvert();
+  }
+});
+
+/* ----- بناء الأمثلة السريعة ----- */
+const EXAMPLES = [
+  { label: 'شرط بسيط',          cat: 'logic',  formula: '=IF(A1>10,"كبير","صغير")' },
+  { label: 'مجموع نطاق',        cat: 'math',   formula: '=SUM(A1:A10)' },
+  { label: 'متوسط',             cat: 'math',   formula: '=AVERAGE(B1:B5)' },
+  { label: 'دمج نصوص',          cat: 'text',   formula: '=CONCATENATE("الإجمالي: ",A1," ر.س")' },
+  { label: 'بحث عمودي',         cat: 'lookup', formula: '=VLOOKUP(A2,B1:D10,3,FALSE)' },
+  { label: 'بحث + INDEX/MATCH', cat: 'lookup', formula: '=INDEX(C1:C10,MATCH(A2,B1:B10,0))' },
+  { label: 'عدّ بشرط',          cat: 'count',  formula: '=COUNTIF(A1:A20,">100")' },
+  { label: 'عدّ بشروط متعددة',  cat: 'count',  formula: '=COUNTIFS(A1:A10,">0",B1:B10,"معتمد")' },
+  { label: 'استخراج جزء نص',    cat: 'text',   formula: '=MID(A1,3,5)' },
+  { label: 'استبدال نص',        cat: 'text',   formula: '=SUBSTITUTE(A1,"-","/")' },
+  { label: 'الفرق بين تاريخين', cat: 'date',   formula: '=DATEDIF(A1,B1,"D")' },
+  { label: 'إضافة شهور',        cat: 'date',   formula: '=EDATE(A1,3)' },
+  { label: 'سنة من تاريخ',      cat: 'date',   formula: '=YEAR(TODAY())' },
+  { label: 'تاريخ مخصص',        cat: 'date',   formula: '=DATE(2026,6,15)' },
+  { label: 'فحص خلية فارغة',    cat: 'check',  formula: '=IF(ISBLANK(A1),"فارغ","موجود")' },
+  { label: 'فحص رقم',           cat: 'check',  formula: '=IF(ISNUMBER(A1),A1*2,0)' },
+  { label: 'الجذر التربيعي',    cat: 'math',   formula: '=SQRT(POWER(A1,2)+POWER(B1,2))' },
+  { label: 'باقي القسمة',       cat: 'math',   formula: '=IF(MOD(A1,2)=0,"زوجي","فردي")' }
+];
+
+const $examples = document.getElementById('examples-grid');
+EXAMPLES.forEach(ex => {
+  const card = document.createElement('div');
+  card.className = 'example-card';
+  card.innerHTML = `
+    <div class="label">
+      ${escapeHtml(ex.label)}
+      <span class="cat-pill ref-cat ${ex.cat}">${CAT_LABELS[ex.cat]}</span>
+    </div>
+    <div class="formula">${escapeHtml(ex.formula)}</div>
+  `;
+  card.addEventListener('click', () => {
+    $input.value = ex.formula;
+    renderHighlight(ex.formula);
+    $input.focus();
+    doConvert();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  $examples.appendChild(card);
+});
+
+/* ----- جدول المرجع مع التصفية ----- */
+const $refBody = document.getElementById('ref-table-body');
+Object.entries(FUNCTIONS).forEach(([name, info]) => {
+  const tr = document.createElement('tr');
+  tr.dataset.cat = info.cat;
+  tr.innerHTML = `
+    <td><span class="ref-cat ${info.cat}">${CAT_LABELS[info.cat]}</span></td>
+    <td><span class="fn-name">${name}</span></td>
+    <td><span class="js-equiv">${escapeHtml(info.jsEquiv)}</span></td>
+    <td>${escapeHtml(info.desc)}</td>
+  `;
+  $refBody.appendChild(tr);
+});
+
+const $refControls = document.getElementById('ref-controls');
+const cats = ['all', ...new Set(Object.values(FUNCTIONS).map(f => f.cat))];
+cats.forEach((cat, idx) => {
+  const btn = document.createElement('button');
+  btn.className = 'filter-btn' + (idx === 0 ? ' active' : '');
+  btn.dataset.cat = cat;
+  const count = cat === 'all'
+    ? Object.keys(FUNCTIONS).length
+    : Object.values(FUNCTIONS).filter(f => f.cat === cat).length;
+  btn.textContent = cat === 'all' ? `الكل (${count})` : `${CAT_LABELS[cat]} (${count})`;
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('#ref-table-body tr').forEach(tr => {
+      tr.classList.toggle('hidden', cat !== 'all' && tr.dataset.cat !== cat);
+    });
+  });
+  $refControls.appendChild(btn);
+});
+
+</script>
+</body>
+</html>
