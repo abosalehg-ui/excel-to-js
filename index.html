@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>محوّل صيغ Excel إلى JavaScript - V2</title>
+<title>محوّل صيغ Excel إلى JavaScript - V3</title>
 <style>
   :root {
     --bg: #f4f6f9;
@@ -389,8 +389,8 @@
   <header>
     <div class="header-top">
       <h1>محوّل صيغ Excel إلى JavaScript
-        <span class="badge">V2</span>
-        <span class="badge count">39 دالة</span>
+        <span class="badge">V3</span>
+        <span class="badge count">44 دالة</span>
       </h1>
       <button class="theme-toggle" id="theme-toggle" title="تبديل الوضع الليلي">🌙</button>
     </div>
@@ -452,7 +452,7 @@
   </section>
 
   <section class="reference-section">
-    <h2 class="section-title">📚 الدوال المدعومة (39 دالة)</h2>
+    <h2 class="section-title">📚 الدوال المدعومة (44 دالة)</h2>
     <div class="ref-controls" id="ref-controls"></div>
     <div class="ref-table-wrap">
       <table class="ref-table">
@@ -470,24 +470,24 @@
   </section>
 
   <footer>
-    أداة محلية مستقلة • تعمل بدون إنترنت • النسخة 2.0 • 39 دالة
+    أداة محلية مستقلة • تعمل بدون إنترنت • النسخة 3.0 • 44 دالة
   </footer>
 </div>
 
 <div class="toast" id="toast">تم النسخ ✓</div>
 
-<script src="data/converter.js"></script>
+<script src="assets/helpers.js"></script>
+<script src="assets/functions.js"></script>
+<script src="assets/engine.js"></script>
 <script>
 /* ============================================================================
-                  محوّل صيغ Excel إلى JavaScript - النسخة 2
+                  محوّل صيغ Excel إلى JavaScript - النسخة 3
    ============================================================================
    البنية:
-     1. Helpers - دوال runtime مساعدة (تُولّد عند الحاجة فقط)
-     2. القاموس - قائمة الدوال المدعومة (39 دالة)
-     3. Tokenizer - يقسم الصيغة إلى رموز
-     4. Parser - يبني شجرة AST من الرموز
-     5. Generator - يحوّل الـ AST إلى كود JS مع helpers
-     6. الواجهة - الربط مع DOM + التظليل + النسخ
+     - assets/helpers.js   ← قاموس HELPERS (runtime helpers تُولّد عند الحاجة)
+     - assets/functions.js ← قاموس FUNCTIONS (الدوال المدعومة، 44 دالة)
+     - assets/engine.js    ← Tokenizer + Parser + Generator + convertFormula
+     - هذا السكربت         ← UI: ربط DOM + التظليل + النسخ + الأمثلة
    ============================================================================ */
 
 
