@@ -5,6 +5,7 @@
 [![Live Demo](https://img.shields.io/badge/🌐%20Live%20Demo-abosalehg--ui.github.io-2c5282?style=for-the-badge)](https://abosalehg-ui.github.io/excel-to-js/)
 [![Version](https://img.shields.io/badge/Version-3.0-success?style=for-the-badge)](https://github.com/abosalehg-ui/excel-to-js)
 [![Functions](https://img.shields.io/badge/Functions-44-orange?style=for-the-badge)](#-الدوال-المدعومة)
+[![Tests](https://img.shields.io/badge/Tests-100%2F100%20✓-2f7d4f?style=for-the-badge)](tests.html)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
 **أداة محلية بالكامل لتحويل صيغ Excel إلى كود JavaScript جاهز — تعمل بدون إنترنت**
@@ -49,26 +50,37 @@ git clone https://github.com/abosalehg-ui/excel-to-js.git
 
 **الصيغة في Excel:**
 ```
-=VLOOKUP(A2,B1:D10,3,FALSE)
+=IF(MOD(A1, 2) = 0, "زوجي", "فردي")
 ```
 
 **الكود الناتج:**
 ```javascript
+// دالة محوّلة من صيغة Excel
+// المُدخلات المطلوبة: a1
+function calculate(a1) {
+  return (((a1) % (2)) === 0 ? "زوجي" : "فردي");
+}
+```
+
+**مثال بـ helper مساعد:**
+```
+=COUNTIF(A1:A5, ">10")
+```
+```javascript
 // ===== Helpers مساعدة =====
-function _vlookup(lookupValue, table, colIndex, exactMatch) {
-  if (!Array.isArray(table) || table.length === 0) return '#N/A';
-  for (const row of table) {
-    if (row[0] === lookupValue) return row[colIndex - 1];
-  }
-  return '#N/A';
+function _matchCriteria(value, criteria) { /* ... */ }
+function _countif(range, criteria) {
+  const arr = Array.isArray(range) ? range.flat(Infinity) : [range];
+  return arr.filter(v => _matchCriteria(v, criteria)).length;
 }
 
 // ===== الدالة الرئيسية =====
-// المُدخلات المطلوبة: a2, b1, c1, d1, b2, c2, d2, ...
-function calculate(a2, b1, c1, d1, b2, c2, d2, b3, c3, d3, ...) {
-  return _vlookup(a2, [[b1,c1,d1],[b2,c2,d2],[b3,c3,d3],...], 3, (false === false || false === 0));
+function calculate(a1, a2, a3, a4, a5) {
+  return _countif([a1, a2, a3, a4, a5], ">10");
 }
 ```
+
+> الـ Generator يجمع الـ helpers تلقائياً ويرتّبها topologically (التبعيات قبل المعتمدين).
 
 ---
 
@@ -185,12 +197,17 @@ Excel Formula Input
 
 ## 🧪 الاختبارات
 
-افتح `tests.html` في المتصفح لتشغيل suite الاختبارات. يغطي:
+افتح `tests.html` في أي متصفح — **بدون أي tools خارجية**:
 
-- **Tokenizer** — التعرّف على الخلايا، النطاقات، الأرقام، النصوص، العمليات
-- **Parser** — بناء الـ AST، أولويات العمليات، الأخطاء النحوية
-- **Generator** — توليد كود JS صحيح، تتبّع الخلايا والـ helpers
-- **Runtime** — تنفيذ الكود الناتج للتأكد من صحة النتائج
+| الفئة | العدد | تغطّي |
+|---|---:|---|
+| Tokenizer | 15 | الخلايا، النطاقات، الأرقام، النصوص (مع `""` escape)، العمليات، تتبع المواضع، رفض الأعمدة الكاملة |
+| Parser | 15 | بناء AST، أولويات العمليات، nested calls، الـ unary، استرداد الأخطاء النحوية |
+| Generator | 14 | توليد JS، تتبع الخلايا (natural sort)، ترتيب helpers topological، حد 1000 خلية |
+| Runtime | 56 | تنفيذ كود حقيقي عبر `new Function` لكل الـ 44 دالة + صيغ مركّبة |
+| **المجموع** | **100/100 ✓** | تشغيل في ~10ms |
+
+الـ **Runtime tests** يبني `calculate()` فعلياً ويشغّلها بقيم خلايا، فيلتقط أي خلل من الـ generator أو الـ helpers من البداية للنهاية.
 
 ---
 
@@ -199,15 +216,35 @@ Excel Formula Input
 ```
 excel-to-js/
 ├── index.html              ← الواجهة (HTML + CSS + سكربت UI)
-├── tests.html              ← suite الاختبارات (يفتح في أي متصفح)
+├── tests.html              ← runner الاختبارات (يفتح في أي متصفح)
 ├── README.md
-└── assets/
-    ├── helpers.js          ← قاموس HELPERS (runtime helpers)
-    ├── functions.js        ← قاموس FUNCTIONS (44 دالة)
-    └── engine.js           ← Tokenizer + Parser + Generator
+├── assets/
+│   ├── helpers.js          ← قاموس HELPERS (runtime helpers، ~200 سطر)
+│   ├── functions.js        ← قاموس FUNCTIONS (44 دالة، ~330 سطر)
+│   └── engine.js           ← Tokenizer + Parser + Generator (~400 سطر)
+└── tests/
+    └── suite.js            ← 100 test case (~560 سطر)
 ```
 
-لا تبعيات خارجية، لا build tools، لا backend.
+لا تبعيات خارجية، لا build tools، لا backend. ينفع كـ submodule في أي مشروع.
+
+---
+
+## 🗺️ خارطة الطريق
+
+V3 تُبنى على مراحل مستقلة:
+
+| المرحلة | الحالة | المحتوى |
+|---|:---:|---|
+| **3.0** | ✅ | فصل الكود لـ 3 ملفات + V2 → V3 |
+| **3.1** | ✅ | Test suite (100 اختبار) |
+| **3.2** | ⏳ | 13 دالة جديدة: `IFNA`, `IFS`, `SWITCH`, `CHOOSE`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `TEXT`, `VALUE`, `INT`, `CEILING`, `FLOOR` |
+| **3.3** | ⏳ | Array Context محدود (`=SUM(IF(A1:A10>0, A1:A10, 0))`) |
+| **3.4** | ⏳ | Named Ranges (`myRange = A1:A10`) |
+| **3.5** | ⏳ | رسائل أخطاء أوضح ("ربما تقصد VLOOKUP؟") |
+| **3.6** | ⏳ | Output modes: Readable / Minified / TypeScript |
+| **3.7** | ⏳ | Share URL (encoding في hash) |
+| **3.8** | ⏳ | Live Test Mode (تشغيل في الواجهة بقيم فعلية) |
 
 ---
 
