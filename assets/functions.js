@@ -10,6 +10,7 @@
      - matrixArgs:  أرقام الوسائط اللي لازم تتولّد كـ 2D matrix
                     (مثلاً VLOOKUP يبغى الجدول كـ matrix لا flat)
    ============================================================ */
+(function (global) {
 const FUNCTIONS = {
   // ===== المنطقية =====
   IF: {
@@ -352,3 +353,7 @@ const FUNCTIONS = {
     generator: (args) => `_isError(${args[0]})`
   }
 };
+
+global.FUNCTIONS = FUNCTIONS;
+if (typeof module !== 'undefined' && module.exports) module.exports = { FUNCTIONS };
+})(typeof window !== 'undefined' ? window : globalThis);

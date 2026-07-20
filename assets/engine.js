@@ -4,6 +4,12 @@
    يعتمد على HELPERS من helpers.js و FUNCTIONS من functions.js
    (لازم تتحمّل قبل هذا الملف).
    ============================================================ */
+(function (global) {
+const HELPERS = global.HELPERS;
+const FUNCTIONS = global.FUNCTIONS;
+if (!HELPERS || !FUNCTIONS) {
+  throw new Error('engine.js يتطلب تحميل helpers.js و functions.js قبله');
+}
 
 /* ============================================================
    Tokenizer
@@ -442,3 +448,12 @@ function convertFormula(input) {
 
   return { code: lines.join('\n'), usedCells, usedHelpers };
 }
+
+global.tokenize = tokenize;
+global.parse = parse;
+global.generate = generate;
+global.convertFormula = convertFormula;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { tokenize, parse, generate, convertFormula };
+}
+})(typeof window !== 'undefined' ? window : globalThis);

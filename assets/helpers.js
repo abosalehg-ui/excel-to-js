@@ -4,6 +4,7 @@
    كل helper يوصف بـ { code, deps? }. الـ deps لتعقّب الترتيب
    topological عند توليد الكود النهائي.
    ============================================================ */
+(function (global) {
 const HELPERS = {
   // _eq: مساواة بدلالات Excel — مقارنة النصوص غير حساسة لحالة الأحرف
   _eq: {
@@ -226,3 +227,7 @@ const HELPERS = {
 }`
   }
 };
+
+global.HELPERS = HELPERS;
+if (typeof module !== 'undefined' && module.exports) module.exports = { HELPERS };
+})(typeof window !== 'undefined' ? window : globalThis);

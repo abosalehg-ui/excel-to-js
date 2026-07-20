@@ -5,7 +5,7 @@
 [![Live Demo](https://img.shields.io/badge/🌐%20Live%20Demo-abosalehg--ui.github.io-2c5282?style=for-the-badge)](https://abosalehg-ui.github.io/excel-to-js/)
 [![Version](https://img.shields.io/badge/Version-3.0-success?style=for-the-badge)](https://github.com/abosalehg-ui/excel-to-js)
 [![Functions](https://img.shields.io/badge/Functions-44-orange?style=for-the-badge)](#-الدوال-المدعومة)
-[![Tests](https://img.shields.io/badge/Tests-100%2F100%20✓-2f7d4f?style=for-the-badge)](tests.html)
+[![Tests](https://img.shields.io/badge/Tests-123%2F123%20✓-2f7d4f?style=for-the-badge)](tests.html)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
 **أداة محلية بالكامل لتحويل صيغ Excel إلى كود JavaScript جاهز — تعمل بدون إنترنت**
@@ -201,11 +201,13 @@ Excel Formula Input
 
 | الفئة | العدد | تغطّي |
 |---|---:|---|
-| Tokenizer | 15 | الخلايا، النطاقات، الأرقام، النصوص (مع `""` escape)، العمليات، تتبع المواضع، رفض الأعمدة الكاملة |
-| Parser | 15 | بناء AST، أولويات العمليات، nested calls، الـ unary، استرداد الأخطاء النحوية |
-| Generator | 14 | توليد JS، تتبع الخلايا (natural sort)، ترتيب helpers topological، حد 1000 خلية |
-| Runtime | 56 | تنفيذ كود حقيقي عبر `new Function` لكل الـ 44 دالة + صيغ مركّبة |
-| **المجموع** | **100/100 ✓** | تشغيل في ~10ms |
+| Tokenizer | 18 | الخلايا، النطاقات (مع مسافات)، الأرقام (مع الترميز العلمي)، النصوص (مع `""` escape)، العمليات، تتبع المواضع، رفض الأعمدة الكاملة |
+| Parser | 19 | بناء AST، أولويات العمليات، `%` كلاحقة نسبة، nested calls، الـ unary، استرداد الأخطاء النحوية |
+| Generator | 20 | توليد JS، فحص عدد الوسائط، تتبع الخلايا (natural sort)، ترتيب helpers topological، حد 1000 خلية |
+| Runtime | 66 | تنفيذ كود حقيقي عبر `new Function` لكل الـ 44 دالة + صيغ مركّبة + دلالات Excel (مقارنة غير حساسة للحالة، lookup تقريبي، DST) |
+| **المجموع** | **123/123 ✓** | تشغيل في ~10ms |
+
+**في الـ CI:** نفس الحزمة تعمل في Node عبر `node tests/run-node.js` (مرتين: UTC ومنطقة بتوقيت صيفي لالتقاط أخطاء التواريخ) — انظر `.github/workflows/tests.yml`.
 
 الـ **Runtime tests** يبني `calculate()` فعلياً ويشغّلها بقيم خلايا، فيلتقط أي خلل من الـ generator أو الـ helpers من البداية للنهاية.
 
