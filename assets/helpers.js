@@ -5,8 +5,19 @@
    topological عند توليد الكود النهائي.
    ============================================================ */
 const HELPERS = {
+  // _eq: مساواة بدلالات Excel — مقارنة النصوص غير حساسة لحالة الأحرف
+  _eq: {
+    code: `function _eq(a, b) {
+  if (typeof a === 'string' && typeof b === 'string') {
+    return a.toLowerCase() === b.toLowerCase();
+  }
+  return a === b;
+}`
+  },
+
   // _matchCriteria: يحاكي شروط COUNTIF مثل ">5", "<>0", "محمد"
   _matchCriteria: {
+    deps: ['_eq'],
     code: `function _matchCriteria(value, criteria) {
   if (typeof criteria === 'number') return value === criteria;
   if (typeof criteria !== 'string') return value === criteria;
@@ -21,40 +32,56 @@ const HELPERS = {
       case '<':  return value < val;
       case '>=': return value >= val;
       case '<=': return value <= val;
-      case '<>': return value !== val;
-      case '=':  return value === val;
+      case '<>': return !_eq(value, val);
+      case '=':  return _eq(value, val);
     }
   }
-  return value === criteria;
+  return _eq(value, criteria);
 }`
   },
 
-  // _vlookup: البحث العمودي
+  // _vlookup: البحث العمودي (تام أو تقريبي بدلالات Excel)
   _vlookup: {
+    deps: ['_eq'],
     code: `function _vlookup(lookupValue, table, colIndex, exactMatch) {
   if (!Array.isArray(table) || table.length === 0) return '#N/A';
-  if (exactMatch === undefined) exactMatch = false;
+  if (exactMatch) {
+    for (const row of table) {
+      if (!Array.isArray(row) || row.length === 0) continue;
+      if (_eq(row[0], lookupValue)) return row[colIndex - 1];
+    }
+    return '#N/A';
+  }
+  // تقريبي (افتراضي Excel): آخر صف قيمته الأولى <= قيمة البحث.
+  // يفترض العمود الأول مرتباً تصاعدياً كما يشترط Excel.
+  let best = null;
   for (const row of table) {
     if (!Array.isArray(row) || row.length === 0) continue;
-    if (row[0] === lookupValue) return row[colIndex - 1];
+    if (row[0] <= lookupValue) best = row;
   }
-  return '#N/A';
+  return best ? best[colIndex - 1] : '#N/A';
 }`
   },
 
-  // _hlookup: البحث الأفقي
+  // _hlookup: البحث الأفقي (تام أو تقريبي بدلالات Excel)
   _hlookup: {
+    deps: ['_eq'],
     code: `function _hlookup(lookupValue, table, rowIndex, exactMatch) {
   if (!Array.isArray(table) || table.length === 0) return '#N/A';
   const firstRow = table[0];
   if (!Array.isArray(firstRow)) return '#N/A';
+  let bestCol = -1;
   for (let c = 0; c < firstRow.length; c++) {
-    if (firstRow[c] === lookupValue) {
-      const targetRow = table[rowIndex - 1];
-      return targetRow ? targetRow[c] : '#N/A';
+    if (exactMatch) {
+      if (_eq(firstRow[c], lookupValue)) { bestCol = c; break; }
+    } else if (firstRow[c] <= lookupValue) {
+      // تقريبي: آخر عمود قيمته في الصف الأول <= قيمة البحث (صف أول مرتب تصاعدياً)
+      bestCol = c;
     }
   }
-  return '#N/A';
+  if (bestCol === -1) return '#N/A';
+  const targetRow = table[rowIndex - 1];
+  return targetRow ? targetRow[bestCol] : '#N/A';
 }`
   },
 
@@ -77,12 +104,13 @@ const HELPERS = {
 
   // _match: البحث عن موضع قيمة
   _match: {
+    deps: ['_eq'],
     code: `function _match(lookupValue, arr, matchType) {
   if (matchType === undefined) matchType = 1;
   arr = Array.isArray(arr) ? arr.flat(Infinity) : [arr];
   if (matchType === 0) {
     for (let i = 0; i < arr.length; i++) {
-      if (arr[i] === lookupValue) return i + 1;
+      if (_eq(arr[i], lookupValue)) return i + 1;
     }
     return '#N/A';
   }
@@ -134,9 +162,13 @@ const HELPERS = {
   const s = start instanceof Date ? start : new Date(start);
   const e = end instanceof Date ? end : new Date(end);
   const u = String(unit).toUpperCase();
-  const ms = 1000 * 60 * 60 * 24;
+  // فرق الأيام التقويمية عبر UTC — القسمة على فرق التوقيت المحلي
+  // تنقص يوماً عند عبور حدود التوقيت الصيفي
+  const days = (a, b) => Math.floor(
+    (Date.UTC(b.getFullYear(), b.getMonth(), b.getDate()) -
+     Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 86400000);
   switch (u) {
-    case 'D': return Math.floor((e - s) / ms);
+    case 'D': return days(s, e);
     case 'Y': {
       let y = e.getFullYear() - s.getFullYear();
       if (e.getMonth() < s.getMonth() ||
@@ -157,7 +189,7 @@ const HELPERS = {
     case 'YD': {
       const sAdj = new Date(e.getFullYear(), s.getMonth(), s.getDate());
       if (sAdj > e) sAdj.setFullYear(sAdj.getFullYear() - 1);
-      return Math.floor((e - sAdj) / ms);
+      return days(sAdj, e);
     }
     case 'MD': {
       let d = e.getDate() - s.getDate();
