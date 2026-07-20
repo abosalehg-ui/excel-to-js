@@ -177,8 +177,6 @@
   .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
   .btn-icon { font-size: 14px; }
 
-  .convert-bar { display: flex; justify-content: center; margin: -8px 0 28px; }
-
   .status {
     margin: 0 0 24px; padding: 12px 16px; border-radius: var(--radius-sm);
     font-size: 14px; border-right: 4px solid; display: none;
@@ -390,7 +388,7 @@
     <div class="header-top">
       <h1>محوّل صيغ Excel إلى JavaScript
         <span class="badge">V3</span>
-        <span class="badge count">44 دالة</span>
+        <span class="badge count" id="fn-count-badge"></span>
       </h1>
       <button class="theme-toggle" id="theme-toggle" title="تبديل الوضع الليلي">🌙</button>
     </div>
@@ -452,7 +450,7 @@
   </section>
 
   <section class="reference-section">
-    <h2 class="section-title">📚 الدوال المدعومة (44 دالة)</h2>
+    <h2 class="section-title">📚 الدوال المدعومة (<span id="fn-count-section"></span> دالة)</h2>
     <div class="ref-controls" id="ref-controls"></div>
     <div class="ref-table-wrap">
       <table class="ref-table">
@@ -470,7 +468,7 @@
   </section>
 
   <footer>
-    أداة محلية مستقلة • تعمل بدون إنترنت • النسخة 3.0 • 44 دالة
+    أداة محلية مستقلة • تعمل بدون إنترنت • النسخة 3.0 • <span id="fn-count-footer"></span> دالة
   </footer>
 </div>
 
@@ -506,6 +504,12 @@ const $btnClear     = document.getElementById('btn-clear');
 const $toast        = document.getElementById('toast');
 
 let lastCode = '';
+
+// عدد الدوال يُحسب من القاموس نفسه — مصدر حقيقة واحد
+const FN_COUNT = Object.keys(FUNCTIONS).length;
+document.getElementById('fn-count-badge').textContent = `${FN_COUNT} دالة`;
+document.getElementById('fn-count-section').textContent = FN_COUNT;
+document.getElementById('fn-count-footer').textContent = FN_COUNT;
 
 const CAT_LABELS = {
   logic: 'منطقية', math: 'رياضية', text: 'نصية',
