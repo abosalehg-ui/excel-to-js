@@ -5,7 +5,7 @@
 [![Live Demo](https://img.shields.io/badge/🌐%20Live%20Demo-abosalehg--ui.github.io-2c5282?style=for-the-badge)](https://abosalehg-ui.github.io/excel-to-js/)
 [![Version](https://img.shields.io/badge/Version-3.0-success?style=for-the-badge)](https://github.com/abosalehg-ui/excel-to-js)
 [![Functions](https://img.shields.io/badge/Functions-44-orange?style=for-the-badge)](#-الدوال-المدعومة)
-[![Tests](https://img.shields.io/badge/Tests-100%2F100%20✓-2f7d4f?style=for-the-badge)](tests.html)
+[![Tests](https://img.shields.io/badge/Tests-123%2F123%20✓-2f7d4f?style=for-the-badge)](tests.html)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
 
 **أداة محلية بالكامل لتحويل صيغ Excel إلى كود JavaScript جاهز — تعمل بدون إنترنت**
@@ -201,11 +201,13 @@ Excel Formula Input
 
 | الفئة | العدد | تغطّي |
 |---|---:|---|
-| Tokenizer | 15 | الخلايا، النطاقات، الأرقام، النصوص (مع `""` escape)، العمليات، تتبع المواضع، رفض الأعمدة الكاملة |
-| Parser | 15 | بناء AST، أولويات العمليات، nested calls، الـ unary، استرداد الأخطاء النحوية |
-| Generator | 14 | توليد JS، تتبع الخلايا (natural sort)، ترتيب helpers topological، حد 1000 خلية |
-| Runtime | 56 | تنفيذ كود حقيقي عبر `new Function` لكل الـ 44 دالة + صيغ مركّبة |
-| **المجموع** | **100/100 ✓** | تشغيل في ~10ms |
+| Tokenizer | 18 | الخلايا، النطاقات (مع مسافات)، الأرقام (مع الترميز العلمي)، النصوص (مع `""` escape)، العمليات، تتبع المواضع، رفض الأعمدة الكاملة |
+| Parser | 19 | بناء AST، أولويات العمليات، `%` كلاحقة نسبة، nested calls، الـ unary، استرداد الأخطاء النحوية |
+| Generator | 20 | توليد JS، فحص عدد الوسائط، تتبع الخلايا (natural sort)، ترتيب helpers topological، حد 1000 خلية |
+| Runtime | 66 | تنفيذ كود حقيقي عبر `new Function` لكل الـ 44 دالة + صيغ مركّبة + دلالات Excel (مقارنة غير حساسة للحالة، lookup تقريبي، DST) |
+| **المجموع** | **123/123 ✓** | تشغيل في ~10ms |
+
+**في الـ CI:** نفس الحزمة تعمل في Node عبر `node tests/run-node.js` (مرتين: UTC ومنطقة بتوقيت صيفي لالتقاط أخطاء التواريخ) — انظر `.github/workflows/tests.yml`.
 
 الـ **Runtime tests** يبني `calculate()` فعلياً ويشغّلها بقيم خلايا، فيلتقط أي خلل من الـ generator أو الـ helpers من البداية للنهاية.
 
@@ -215,15 +217,21 @@ Excel Formula Input
 
 ```
 excel-to-js/
-├── index.html              ← الواجهة (HTML + CSS + سكربت UI)
-├── tests.html              ← runner الاختبارات (يفتح في أي متصفح)
+├── index.html              ← الواجهة (HTML + CSS)
+├── tests.html              ← runner الاختبارات في المتصفح
 ├── README.md
+├── LICENSE                 ← رخصة MIT
 ├── assets/
-│   ├── helpers.js          ← قاموس HELPERS (runtime helpers، ~200 سطر)
-│   ├── functions.js        ← قاموس FUNCTIONS (44 دالة، ~330 سطر)
-│   └── engine.js           ← Tokenizer + Parser + Generator (~400 سطر)
-└── tests/
-    └── suite.js            ← 100 test case (~560 سطر)
+│   ├── helpers.js          ← قاموس HELPERS (runtime helpers)
+│   ├── functions.js        ← قاموس FUNCTIONS (44 دالة + عقود الوسائط)
+│   ├── engine.js           ← Tokenizer + Parser + Generator
+│   └── ui.js               ← سكربت الواجهة (ربط DOM + تظليل + أمثلة)
+├── tests/
+│   ├── framework.js        ← إطار الاختبار المشترك (متصفح + Node)
+│   ├── suite.js            ← 123 test case
+│   └── run-node.js         ← تشغيل الحزمة في Node (بوابة الـ CI)
+└── .github/workflows/
+    └── tests.yml           ← CI: الاختبارات على كل push/PR بمنطقتين زمنيتين
 ```
 
 لا تبعيات خارجية، لا build tools، لا backend. ينفع كـ submodule في أي مشروع.
@@ -238,6 +246,7 @@ V3 تُبنى على مراحل مستقلة:
 |---|:---:|---|
 | **3.0** | ✅ | فصل الكود لـ 3 ملفات + V2 → V3 |
 | **3.1** | ✅ | Test suite (100 اختبار) |
+| **3.1.1** | ✅ | إصلاحات المراجعة الهندسية: دقة دلالات Excel (lookup تقريبي، `_eq`، `%` لاحقة، DST) + عقود الوسائط + CI + إعادة هيكلة (ui.js/framework.js/UMD) — الاختبارات 100 → 123 |
 | **3.2** | ⏳ | 13 دالة جديدة: `IFNA`, `IFS`, `SWITCH`, `CHOOSE`, `SUMIF`, `SUMIFS`, `AVERAGEIF`, `AVERAGEIFS`, `TEXT`, `VALUE`, `INT`, `CEILING`, `FLOOR` |
 | **3.3** | ⏳ | Array Context محدود (`=SUM(IF(A1:A10>0, A1:A10, 0))`) |
 | **3.4** | ⏳ | Named Ranges (`myRange = A1:A10`) |
@@ -254,6 +263,20 @@ V3 تُبنى على مراحل مستقلة:
 - **النطاقات الكبيرة:** الحد الأقصى 1000 خلية لكل نطاق
 - **الأعمدة الكاملة:** `A:B` غير مدعومة، استخدم `A1:B100`
 - **التواريخ:** تُعامَل كـ `Date` objects في JS، ليس كأرقام تسلسلية
+- **`%` لاحقة نسبة مئوية** كما في Excel (`50%` = 0.5) — لباقي القسمة استخدم `MOD` (في الإصدارات قبل 3.1.1 كانت `%` تعمل كباقي قسمة ثنائي، وهذا لا يطابق Excel)
+
+### 📐 الانحرافات المعروفة عن Excel
+
+المحوّل يحاكي دلالات Excel بدقة في المقارنات (`=`/`<>` غير حساسة لحالة الأحرف)، والبحث التقريبي في `VLOOKUP`/`HLOOKUP`/`MATCH`، والحدّيات الفارغة (`MIN`/`MAX` → 0، `AVERAGE` → `#DIV/0!`). الفروقات المتبقية الموثقة:
+
+| الحالة | Excel | المحوّل |
+|---|---|---|
+| ترتيب النصوص في `<` / `>` | غير حساس للحالة | حساس للحالة (`<`/`>` في JS) |
+| نص رقمي داخل نطاق في `SUM` | يُتجاهل | يُجمع (`Number("5")` = 5) |
+| wildcards في `COUNTIF` (`*`, `?`) | مدعومة | مطابقة حرفية |
+| البحث التقريبي في جدول غير مرتب | نتائج غير معرفة (بحث ثنائي) | مسح كامل يحتفظ بآخر قيمة ≤ |
+| دقة الفاصلة العائمة في `ROUND` | تقريب عشري داخلي | حساب IEEE 754 (فروقات نادرة مثل 1.005) |
+| الأخطاء (`#N/A` وغيرها) | نوع خطأ مستقل | نص عادي تفحصه `_isError` |
 
 ---
 

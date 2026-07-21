@@ -104,6 +104,22 @@ test('Tokenizer', 'يرفض رمز غير معروف', () => {
   assertThrows(() => tokenize('A1@'), 'غير متوقع');
 });
 
+test('Tokenizer', 'ترميز علمي: 1E5 و 2.5e-3', () => {
+  assertEqual(tokenize('1E5')[0].type, 'NUMBER');
+  assertEqual(tokenize('1E5')[0].value, '1E5');
+  assertEqual(tokenize('2.5e-3')[0].value, '2.5e-3');
+});
+
+test('Tokenizer', 'نطاق بمسافات حول النقطتين: A1 : A3', () => {
+  const t = tokenize('A1 : A3');
+  assertEqual(t.length, 1);
+  assertEqual(t[0].type, 'RANGE');
+});
+
+test('Tokenizer', 'الباكسلاش داخل النص حرف عادي (لا escape كما في Excel)', () => {
+  assertEqual(tokenize('"a\\b"')[0].value, 'a\\b');
+});
+
 /* =========================================================
    2) Parser
    ========================================================= */
@@ -197,6 +213,23 @@ test('Parser', 'rejects empty formula', () => {
   assertThrows(() => parse([]), 'متوقع');
 });
 
+test('Parser', 'نطاق بمسافات يُطبَّع: A1 : A3', () => {
+  const ast = parse(tokenize('A1 : A3'));
+  assertEqual(ast.type, 'Range');
+  assertEqual(ast.start, 'A1');
+  assertEqual(ast.end, 'A3');
+});
+
+test('Parser', '% لاحقة نسبة مئوية: 50% → Percent node', () => {
+  const ast = parse(tokenize('50%'));
+  assertEqual(ast.type, 'Percent');
+  assertEqual(ast.arg.value, 50);
+});
+
+test('Parser', '10%5 يُرفض (لا يوجد عامل % ثنائي في Excel)', () => {
+  assertThrows(() => parse(tokenize('10%5')), 'إضافي');
+});
+
 /* =========================================================
    3) Generator
    ========================================================= */
@@ -227,14 +260,15 @@ test('Generator', 'Binary + → " + "', () => {
   assertEqual(r.expr, '(a1 + b1)');
 });
 
-test('Generator', 'Comparison = → ===', () => {
+test('Generator', 'Comparison = → _eq (بدلالات Excel غير الحساسة للحالة)', () => {
   const r = generate(parse(tokenize('A1=5')));
-  assertEqual(r.expr, '(a1 === 5)');
+  assertEqual(r.expr, '_eq(a1, 5)');
+  assertEqual(r.usedHelpers.includes('_eq'), true);
 });
 
-test('Generator', 'Comparison <> → !==', () => {
+test('Generator', 'Comparison <> → !_eq', () => {
   const r = generate(parse(tokenize('A1<>0')));
-  assertEqual(r.expr, '(a1 !== 0)');
+  assertEqual(r.expr, '(!_eq(a1, 0))');
 });
 
 test('Generator', '& → String concat', () => {
@@ -283,6 +317,28 @@ test('Generator', 'صيغة بدون cells → usedCells فارغة', () => {
   assertEqual(r.usedCells, []);
 });
 
+test('Generator', 'فحص مركزي للوسائط: AND() تُرفض', () => {
+  assertThrows(() => generate(parse(tokenize('AND()'))), 'تتوقع');
+});
+
+test('Generator', 'فحص مركزي للوسائط: IF بأربع وسائط تُرفض', () => {
+  assertThrows(() => generate(parse(tokenize('IF(1,2,3,4)'))), 'تتوقع');
+});
+
+test('Generator', 'فحص مركزي للوسائط: TODAY لا تقبل وسائط', () => {
+  assertThrows(() => generate(parse(tokenize('TODAY(1)'))), 'تتوقع');
+});
+
+test('Generator', 'فحص مركزي للوسائط: IFERROR بوسيط واحد تُرفض', () => {
+  assertThrows(() => generate(parse(tokenize('IFERROR(A1)'))), 'تتوقع');
+});
+
+test('Generator', 'IFERROR لا يكرر تعبير البديل في الكود المولّد', () => {
+  const r = generate(parse(tokenize('IFERROR(A1, B1+C1)')));
+  const occurrences = r.expr.split('(b1 + c1)').length - 1;
+  assertEqual(occurrences, 1);
+});
+
 /* =========================================================
    4) Runtime — أهم فئة، تنفّذ الكود الناتج
    ========================================================= */
@@ -318,6 +374,17 @@ test('Runtime: Logic', 'IFERROR يلتقط خطأ القسمة على صفر', (
 test('Runtime: Logic', 'IFERROR يلتقط #N/A النصية', () => {
   assertEqual(runFormula('=IFERROR(VLOOKUP("xxx", A1:B2, 2, FALSE), "ما لقيناه")',
     { a1: 'foo', b1: 1, a2: 'bar', b2: 2 }), 'ما لقيناه');
+});
+
+test('Runtime: Logic', 'مقارنة النصوص غير حساسة للحالة (سلوك Excel)', () => {
+  assertEqual(runFormula('=A1=B1', { a1: 'abc', b1: 'ABC' }), true);
+  assertEqual(runFormula('=A1<>B1', { a1: 'abc', b1: 'ABC' }), false);
+  assertEqual(runFormula('=A1=B1', { a1: 'abc', b1: 'xyz' }), false);
+});
+
+test('Runtime: Logic', 'AND/OR على نطاق (كل القيم لا أول قيمة)', () => {
+  assertEqual(runFormula('=AND(A1:A3)', { a1: true, a2: true, a3: false }), false);
+  assertEqual(runFormula('=OR(A1:A3)', { a1: false, a2: false, a3: true }), true);
 });
 
 // === Math ===
@@ -366,6 +433,21 @@ test('Runtime: Math', 'parens: (2+3)*4 = 20', () => {
 
 test('Runtime: Math', 'unary minus', () => {
   assertEqual(runFormula('=-A1', { a1: 5 }), -5);
+});
+
+test('Runtime: Math', '% لاحقة نسبة مئوية: 50% = 0.5 و A1*10%', () => {
+  assertEqual(runFormula('=50%', {}), 0.5);
+  assertEqual(runFormula('=A1*10%', { a1: 200 }), 20);
+});
+
+test('Runtime: Math', 'MIN/MAX بلا أرقام → 0 (سلوك Excel)', () => {
+  assertEqual(runFormula('=MIN(A1:A2)', { a1: 'x', a2: 'y' }), 0);
+  assertEqual(runFormula('=MAX(A1:A2)', { a1: 'x', a2: 'y' }), 0);
+});
+
+test('Runtime: Math', 'AVERAGE بلا أرقام → #DIV/0! (سلوك Excel)', () => {
+  assertEqual(runFormula('=AVERAGE(A1:A2)', { a1: 'x', a2: 'y' }), '#DIV/0!');
+  assertEqual(runFormula('=IFERROR(AVERAGE(A1:A2), "لا أرقام")', { a1: 'x', a2: 'y' }), 'لا أرقام');
 });
 
 // === Text ===
@@ -440,6 +522,10 @@ test('Runtime: Count', 'COUNTIFS بشروط متعددة', () => {
     { a1: 1, a2: 2, a3: -1, b1: 'y', b2: 'n', b3: 'y' }), 1);
 });
 
+test('Runtime: Count', 'COUNTIF غير حساسة لحالة النص (سلوك Excel)', () => {
+  assertEqual(runFormula('=COUNTIF(A1:A3, "yes")', { a1: 'YES', a2: 'no', a3: 'Yes' }), 2);
+});
+
 // === Lookup ===
 test('Runtime: Lookup', 'VLOOKUP exact match', () => {
   assertEqual(runFormula('=VLOOKUP("b", A1:B3, 2, FALSE)',
@@ -451,9 +537,32 @@ test('Runtime: Lookup', 'VLOOKUP لا يجد → #N/A', () => {
     { a1: 'a', b1: 1, a2: 'b', b2: 2 }), '#N/A');
 });
 
+test('Runtime: Lookup', 'VLOOKUP تقريبية (الوسيط الرابع محذوف = افتراضي Excel)', () => {
+  // جدول مرتب تصاعدياً: أكبر قيمة <= 2.5 هي 2 → صفها يعطي 20
+  assertEqual(runFormula('=VLOOKUP(2.5, A1:B3, 2)',
+    { a1: 1, b1: 10, a2: 2, b2: 20, a3: 3, b3: 30 }), 20);
+});
+
+test('Runtime: Lookup', 'VLOOKUP تقريبية صريحة (TRUE) وأصغر من الأول → #N/A', () => {
+  assertEqual(runFormula('=VLOOKUP(2.5, A1:B3, 2, TRUE)',
+    { a1: 1, b1: 10, a2: 2, b2: 20, a3: 3, b3: 30 }), 20);
+  assertEqual(runFormula('=VLOOKUP(0, A1:B2, 2, TRUE)',
+    { a1: 1, b1: 10, a2: 2, b2: 20 }), '#N/A');
+});
+
+test('Runtime: Lookup', 'VLOOKUP exact غير حساسة لحالة النص', () => {
+  assertEqual(runFormula('=VLOOKUP("B", A1:B2, 2, FALSE)',
+    { a1: 'a', b1: 1, a2: 'b', b2: 2 }), 2);
+});
+
 test('Runtime: Lookup', 'HLOOKUP', () => {
   assertEqual(runFormula('=HLOOKUP("b", A1:C2, 2, FALSE)',
     { a1: 'a', b1: 'b', c1: 'c', a2: 1, b2: 2, c2: 3 }), 2);
+});
+
+test('Runtime: Lookup', 'HLOOKUP تقريبية (الوسيط الرابع محذوف)', () => {
+  assertEqual(runFormula('=HLOOKUP(2.5, A1:C2, 2)',
+    { a1: 1, b1: 2, c1: 3, a2: 10, b2: 20, c2: 30 }), 20);
 });
 
 test('Runtime: Lookup', 'INDEX 2D', () => {
@@ -502,6 +611,17 @@ test('Runtime: Date', 'DATEDIF بوحدات Y/M/D', () => {
   assertEqual(runFormula('=DATEDIF(DATE(2020,1,1), DATE(2026,3,15), "Y")', {}), 6);
   assertEqual(runFormula('=DATEDIF(DATE(2026,1,1), DATE(2026,4,1), "M")', {}), 3);
   assertEqual(runFormula('=DATEDIF(DATE(2026,1,1), DATE(2026,1,11), "D")', {}), 10);
+});
+
+test('Runtime: Date', 'DATEDIF "D" عبر ستة أشهر (ثابتة ضد التوقيت الصيفي)', () => {
+  // 1 يناير → 1 يوليو 2026 = 181 يوماً بالضبط أياً كانت المنطقة الزمنية
+  // (القسمة على فرق التوقيت المحلي كانت تعطي 180 في مناطق DST)
+  assertEqual(runFormula('=DATEDIF(DATE(2026,1,1), DATE(2026,7,1), "D")', {}), 181);
+});
+
+test('Runtime: Date', 'DATEDIF "YD" عبر حد التوقيت الصيفي', () => {
+  // sAdj = 2026-02-01 → إلى 2026-07-01: 28+31+30+31+30 = 150 يوماً
+  assertEqual(runFormula('=DATEDIF(DATE(2025,2,1), DATE(2026,7,1), "YD")', {}), 150);
 });
 
 test('Runtime: Date', 'DATEDIF بوحدات YM / MD', () => {

@@ -4,6 +4,12 @@
    يعتمد على HELPERS من helpers.js و FUNCTIONS من functions.js
    (لازم تتحمّل قبل هذا الملف).
    ============================================================ */
+(function (global) {
+const HELPERS = global.HELPERS;
+const FUNCTIONS = global.FUNCTIONS;
+if (!HELPERS || !FUNCTIONS) {
+  throw new Error('engine.js يتطلب تحميل helpers.js و functions.js قبله');
+}
 
 /* ============================================================
    Tokenizer
@@ -17,15 +23,16 @@ function tokenize(input) {
 
   const patterns = [
     [/^\s+/,                                  null],
-    [/^"((?:[^"\\]|\\.|"")*)"/,               'STRING'],
+    // "" داخل النص = اقتباس مهرّب (دلالات Excel — لا يوجد escape بالباكسلاش)
+    [/^"((?:""|[^"])*)"/,                     'STRING'],
     [/^(TRUE|FALSE)\b/i,                      'BOOLEAN'],
     [/^[A-Za-z_][A-Za-z0-9_\.]*(?=\s*\()/,    'FUNCTION'],
-    [/^\$?[A-Za-z]+\$?\d+:\$?[A-Za-z]+\$?\d+/, 'RANGE'],
+    [/^\$?[A-Za-z]+\$?\d+\s*:\s*\$?[A-Za-z]+\$?\d+/, 'RANGE'],
     // عمود كامل (B:C) — نلتقطه علشان نرفضه برسالة واضحة
     [/^\$?[A-Za-z]+:\$?[A-Za-z]+(?![A-Za-z0-9])/, 'FULL_COLUMN'],
     [/^\$?[A-Za-z]+\$?\d+/,                   'CELL_REF'],
-    [/^\d+\.?\d*/,                            'NUMBER'],
-    [/^\.\d+/,                                'NUMBER'],
+    [/^\d+\.?\d*(?:[Ee][+-]?\d+)?/,           'NUMBER'],
+    [/^\.\d+(?:[Ee][+-]?\d+)?/,               'NUMBER'],
     [/^(<=|>=|<>|=|<|>)/,                     'OPERATOR_CMP'],
     [/^[+\-*/%^&]/,                           'OPERATOR'],
     [/^[,;]/,                                 'COMMA'],
@@ -124,7 +131,7 @@ function parse(tokens) {
   }
   function parseMulDiv() {
     let left = parsePower();
-    while (peek() && peek().type === 'OPERATOR' && (peek().value === '*' || peek().value === '/' || peek().value === '%')) {
+    while (peek() && peek().type === 'OPERATOR' && (peek().value === '*' || peek().value === '/')) {
       const op = eat().value;
       const right = parsePower();
       left = { type: 'Binary', op, left, right };
@@ -146,7 +153,16 @@ function parse(tokens) {
       const arg = parseUnary();
       return { type: 'Unary', op, arg };
     }
-    return parsePrimary();
+    return parsePostfix();
+  }
+  // % في Excel لاحقة نسبة مئوية (50% = 0.5)، وليست عامل باقي قسمة
+  function parsePostfix() {
+    let node = parsePrimary();
+    while (peek() && peek().type === 'OPERATOR' && peek().value === '%') {
+      eat();
+      node = { type: 'Percent', arg: node };
+    }
+    return node;
   }
   function parsePrimary() {
     const t = peek();
@@ -167,7 +183,8 @@ function parse(tokens) {
     if (t.type === 'CELL_REF'){ eat(); return { type: 'CellRef', name: t.value.replace(/\$/g, '') }; }
     if (t.type === 'RANGE')   {
       eat();
-      const [s, e] = t.value.replace(/\$/g, '').split(':');
+      // نطبّع $ والمسافات حول النقطتين (Excel يقبل "A1 : B2")
+      const [s, e] = t.value.replace(/[$\s]/g, '').split(':');
       return { type: 'Range', start: s, end: e };
     }
     if (t.type === 'FUNCTION') {
@@ -262,9 +279,8 @@ function generate(ast) {
   }
 
   const opMap = {
-    '=':  '===', '<>': '!==',
     '<':  '<', '>': '>', '<=': '<=', '>=': '>=',
-    '+':  '+', '-': '-', '*': '*', '/': '/', '%': '%'
+    '+':  '+', '-': '-', '*': '*', '/': '/'
   };
 
   function registerHelper(name) {
@@ -297,11 +313,17 @@ function generate(ast) {
       case 'Unary':
         return `(${node.op}${gen(node.arg)})`;
 
+      case 'Percent':
+        return `((${gen(node.arg)}) / 100)`;
+
       case 'Binary': {
         const L = gen(node.left);
         const R = gen(node.right);
         if (node.op === '&') return `(String(${L}) + String(${R}))`;
         if (node.op === '^') return `Math.pow(${L}, ${R})`;
+        // = و <> بدلالات Excel: مقارنة النصوص غير حساسة لحالة الأحرف
+        if (node.op === '=')  { registerHelper('_eq'); return `_eq(${L}, ${R})`; }
+        if (node.op === '<>') { registerHelper('_eq'); return `(!_eq(${L}, ${R}))`; }
         return `(${L} ${opMap[node.op]} ${R})`;
       }
 
@@ -311,6 +333,20 @@ function generate(ast) {
           const err = new Error(`الدالة "${node.name}" غير مدعومة في النسخة الحالية`);
           err.start = node.start; err.end = node.end;
           err.unsupported = node.name;
+          throw err;
+        }
+
+        // فحص مركزي لعدد الوسائط حسب عقد الدالة (minArgs/maxArgs)
+        const argc = node.args.length;
+        const min = fn.minArgs ?? 0;
+        const max = fn.maxArgs ?? Infinity;
+        if (argc < min || argc > max) {
+          const expected =
+            min === max ? `${min}` :
+            max === Infinity ? `${min}+` :
+            `${min}–${max}`;
+          const err = new Error(`الدالة ${node.name} تتوقع ${expected} من الوسائط، وُجد ${argc}`);
+          err.start = node.start; err.end = node.end;
           throw err;
         }
 
@@ -383,6 +419,17 @@ function convertFormula(input) {
   const ast = parse(tokens);
   const { expr, usedCells, usedHelpers } = generate(ast);
 
+  // شبكة أمان: نتأكد أن التعبير المولّد صالح نحوياً قبل عرضه للمستخدم
+  // (new Function تُصرّف فقط ولا تنفّذ — الـ helpers غير المعرفة لا تضر)
+  try {
+    new Function(usedCells.join(', '), `return ${expr};`);
+  } catch (e) {
+    throw Object.assign(
+      new Error(`خطأ داخلي: الكود المولّد غير صالح نحوياً (${e.message}). الرجاء الإبلاغ عن هذه الصيغة.`),
+      { start: 0, end: input.length }
+    );
+  }
+
   const lines = [];
   if (usedHelpers.length > 0) {
     lines.push(`// ===== Helpers مساعدة =====`);
@@ -401,3 +448,12 @@ function convertFormula(input) {
 
   return { code: lines.join('\n'), usedCells, usedHelpers };
 }
+
+global.tokenize = tokenize;
+global.parse = parse;
+global.generate = generate;
+global.convertFormula = convertFormula;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { tokenize, parse, generate, convertFormula };
+}
+})(typeof window !== 'undefined' ? window : globalThis);
