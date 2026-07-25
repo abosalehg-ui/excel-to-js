@@ -19,10 +19,7 @@
     const e = JSON.stringify(expected);
     if (a === e) return;
     if (Number.isNaN(actual) && Number.isNaN(expected)) return;
-    throw new Error(
-      (label ? label + '\n  ' : '') +
-      `expected: ${e}\n  actual:   ${a}`
-    );
+    throw new Error((label ? label + '\n  ' : '') + `expected: ${e}\n  actual:   ${a}`);
   }
 
   function assertClose(actual, expected, eps, label) {
@@ -39,7 +36,7 @@
     if (typeof haystack !== 'string' || haystack.indexOf(needle) === -1) {
       throw new Error(
         (label ? label + '\n  ' : '') +
-        `expected to contain: ${JSON.stringify(needle)}\n  in:               ${JSON.stringify(haystack)}`
+          `expected to contain: ${JSON.stringify(needle)}\n  in:               ${JSON.stringify(haystack)}`
       );
     }
   }
@@ -47,14 +44,15 @@
   function assertThrows(fn, msgPart, label) {
     let threw = false;
     let actualMsg = '';
-    try { fn(); }
-    catch (e) {
+    try {
+      fn();
+    } catch (e) {
       threw = true;
       actualMsg = e.message;
       if (msgPart && actualMsg.indexOf(msgPart) === -1) {
         throw new Error(
           (label ? label + '\n  ' : '') +
-          `error message did not contain: ${JSON.stringify(msgPart)}\n  got: ${JSON.stringify(actualMsg)}`
+            `error message did not contain: ${JSON.stringify(msgPart)}\n  got: ${JSON.stringify(actualMsg)}`
         );
       }
     }
@@ -67,7 +65,7 @@
     const { code, usedCells } = global.convertFormula(formula);
     const body = code + `\nreturn calculate(${usedCells.join(', ')});`;
     const fn = new Function(...usedCells, body);
-    const args = usedCells.map(c => cellValues[c]);
+    const args = usedCells.map((c) => cellValues[c]);
     return fn(...args);
   }
 
@@ -79,6 +77,14 @@
   global.assertThrows = assertThrows;
   global.runFormula = runFormula;
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { TESTS, test, assertEqual, assertClose, assertContains, assertThrows, runFormula };
+    module.exports = {
+      TESTS,
+      test,
+      assertEqual,
+      assertClose,
+      assertContains,
+      assertThrows,
+      runFormula
+    };
   }
 })(typeof window !== 'undefined' ? window : globalThis);

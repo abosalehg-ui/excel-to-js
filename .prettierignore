@@ -1,0 +1,6 @@
+node_modules/
+package-lock.json
+
+# تقارير المراجعة: جداول عربية طويلة يفسدها إعادة التنسيق
+REVIEW.md
+REVIEW-2.md
