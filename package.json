@@ -1,0 +1,22 @@
+{
+  "name": "excel-to-js",
+  "version": "3.1.2",
+  "description": "محوّل صيغ Excel إلى JavaScript — أداة محلية بالكامل تعمل بدون إنترنت",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abosalehg-ui/excel-to-js.git"
+  },
+  "scripts": {
+    "test": "node tests/run-node.js",
+    "test:dst": "TZ=America/New_York node tests/run-node.js",
+    "format": "prettier --write \"**/*.{js,json,yml,md}\"",
+    "format:check": "prettier --check \"**/*.{js,json,yml,md}\""
+  },
+  "devDependencies": {
+    "jsdom": "^25.0.1",
+    "prettier": "^3.3.3"
+  },
+  "comment": "التبعيات هنا أدوات تطوير فقط. التطبيق نفسه بلا أي تبعية وقت تشغيل — يكفي فتح index.html في المتصفح."
+}

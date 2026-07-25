@@ -4,6 +4,10 @@ on:
   push:
   pull_request:
 
+# المهمة تقرأ الكود فقط — لا نرث صلاحيات الكتابة الافتراضية للريبو
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -12,6 +16,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: Install dev dependencies (jsdom for UI tests, prettier)
+        run: npm ci
+      - name: Check formatting
+        run: npx prettier --check "**/*.{js,json,yml,md}"
       - name: Run test suite (UTC)
         run: node tests/run-node.js
       - name: Run test suite (DST timezone)

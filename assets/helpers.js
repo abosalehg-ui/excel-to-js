@@ -5,21 +5,69 @@
    topological عند توليد الكود النهائي.
    ============================================================ */
 (function (global) {
-const HELPERS = {
-  // _eq: مساواة بدلالات Excel — مقارنة النصوص غير حساسة لحالة الأحرف
-  _eq: {
-    code: `function _eq(a, b) {
+  const HELPERS = {
+    // _eq: مساواة بدلالات Excel — مقارنة النصوص غير حساسة لحالة الأحرف
+    _eq: {
+      code: `function _eq(a, b) {
   if (typeof a === 'string' && typeof b === 'string') {
     return a.toLowerCase() === b.toLowerCase();
   }
   return a === b;
 }`
-  },
+    },
 
-  // _matchCriteria: يحاكي شروط COUNTIF مثل ">5", "<>0", "محمد"
-  _matchCriteria: {
-    deps: ['_eq'],
-    code: `function _matchCriteria(value, criteria) {
+    // _nums: يفرد المصفوفة ويُبقي الأرقام الصالحة فقط (أساس SUM/AVERAGE/MIN/MAX/COUNT)
+    _nums: {
+      code: `function _nums(arr) {
+  return arr.flat(Infinity).filter(v => typeof v === 'number' && !isNaN(v));
+}`
+    },
+
+    // _mod: باقي القسمة بدلالات Excel — إشارة الناتج تتبع المقسوم عليه
+    // (‏JS: -3 % 2 = -1، بينما Excel: MOD(-3,2) = 1)
+    _mod: {
+      code: `function _mod(a, b) {
+  const x = Number(a), y = Number(b);
+  if (y === 0) return '#DIV/0!';
+  return ((x % y) + y) % y;
+}`
+    },
+
+    // _round: تقريب بدلالات Excel — النصف يُقرَّب بعيداً عن الصفر
+    // (‏Math.round(-2.5) = -2، بينما Excel: ROUND(-2.5,0) = -3)
+    _round: {
+      code: `function _round(n, digits) {
+  const x = Number(n);
+  if (isNaN(x)) return '#VALUE!';
+  const f = Math.pow(10, Number(digits) || 0);
+  const scaled = x * f;
+  const r = scaled < 0 ? -Math.round(-scaled) : Math.round(scaled);
+  return r / f;
+}`
+    },
+
+    // _substitute: استبدال نص — الكل أو التكرار رقم instance فقط
+    _substitute: {
+      code: `function _substitute(text, oldText, newText, instance) {
+  const s = String(text), o = String(oldText), n = String(newText);
+  if (o === '') return s;
+  if (instance === undefined) return s.split(o).join(n);
+  const target = Number(instance);
+  if (!(target >= 1)) return '#VALUE!';
+  let count = 0, from = 0, idx;
+  while ((idx = s.indexOf(o, from)) !== -1) {
+    count++;
+    if (count === target) return s.slice(0, idx) + n + s.slice(idx + o.length);
+    from = idx + o.length;
+  }
+  return s;
+}`
+    },
+
+    // _matchCriteria: يحاكي شروط COUNTIF مثل ">5", "<>0", "محمد"
+    _matchCriteria: {
+      deps: ['_eq'],
+      code: `function _matchCriteria(value, criteria) {
   if (typeof criteria === 'number') return value === criteria;
   if (typeof criteria !== 'string') return value === criteria;
   const m = criteria.match(/^(>=|<=|<>|>|<|=)(.*)$/);
@@ -39,12 +87,12 @@ const HELPERS = {
   }
   return _eq(value, criteria);
 }`
-  },
+    },
 
-  // _vlookup: البحث العمودي (تام أو تقريبي بدلالات Excel)
-  _vlookup: {
-    deps: ['_eq'],
-    code: `function _vlookup(lookupValue, table, colIndex, exactMatch) {
+    // _vlookup: البحث العمودي (تام أو تقريبي بدلالات Excel)
+    _vlookup: {
+      deps: ['_eq'],
+      code: `function _vlookup(lookupValue, table, colIndex, exactMatch) {
   if (!Array.isArray(table) || table.length === 0) return '#N/A';
   if (exactMatch) {
     for (const row of table) {
@@ -62,12 +110,12 @@ const HELPERS = {
   }
   return best ? best[colIndex - 1] : '#N/A';
 }`
-  },
+    },
 
-  // _hlookup: البحث الأفقي (تام أو تقريبي بدلالات Excel)
-  _hlookup: {
-    deps: ['_eq'],
-    code: `function _hlookup(lookupValue, table, rowIndex, exactMatch) {
+    // _hlookup: البحث الأفقي (تام أو تقريبي بدلالات Excel)
+    _hlookup: {
+      deps: ['_eq'],
+      code: `function _hlookup(lookupValue, table, rowIndex, exactMatch) {
   if (!Array.isArray(table) || table.length === 0) return '#N/A';
   const firstRow = table[0];
   if (!Array.isArray(firstRow)) return '#N/A';
@@ -84,11 +132,11 @@ const HELPERS = {
   const targetRow = table[rowIndex - 1];
   return targetRow ? targetRow[bestCol] : '#N/A';
 }`
-  },
+    },
 
-  // _index: استرجاع قيمة بإحداثيات
-  _index: {
-    code: `function _index(arr, rowNum, colNum) {
+    // _index: استرجاع قيمة بإحداثيات
+    _index: {
+      code: `function _index(arr, rowNum, colNum) {
   if (!Array.isArray(arr)) return '#REF!';
   if (Array.isArray(arr[0])) {
     const row = arr[rowNum - 1];
@@ -101,12 +149,12 @@ const HELPERS = {
   }
   return arr[rowNum - 1];
 }`
-  },
+    },
 
-  // _match: البحث عن موضع قيمة
-  _match: {
-    deps: ['_eq'],
-    code: `function _match(lookupValue, arr, matchType) {
+    // _match: البحث عن موضع قيمة
+    _match: {
+      deps: ['_eq'],
+      code: `function _match(lookupValue, arr, matchType) {
   if (matchType === undefined) matchType = 1;
   arr = Array.isArray(arr) ? arr.flat(Infinity) : [arr];
   if (matchType === 0) {
@@ -122,21 +170,21 @@ const HELPERS = {
   }
   return lastIdx === -1 ? '#N/A' : lastIdx + 1;
 }`
-  },
+    },
 
-  // _countif: عدّ بشرط
-  _countif: {
-    deps: ['_matchCriteria'],
-    code: `function _countif(range, criteria) {
+    // _countif: عدّ بشرط
+    _countif: {
+      deps: ['_matchCriteria'],
+      code: `function _countif(range, criteria) {
   const arr = Array.isArray(range) ? range.flat(Infinity) : [range];
   return arr.filter(v => _matchCriteria(v, criteria)).length;
 }`
-  },
+    },
 
-  // _countifs: عدّ بشروط متعددة
-  _countifs: {
-    deps: ['_matchCriteria'],
-    code: `function _countifs(...args) {
+    // _countifs: عدّ بشروط متعددة
+    _countifs: {
+      deps: ['_matchCriteria'],
+      code: `function _countifs(...args) {
   if (args.length < 2 || args.length % 2 !== 0) return 0;
   const ranges = [], criterias = [];
   for (let i = 0; i < args.length; i += 2) {
@@ -145,6 +193,8 @@ const HELPERS = {
     criterias.push(args[i + 1]);
   }
   const len = ranges[0].length;
+  // Excel يشترط تطابق أحجام النطاقات ويرجّع #VALUE! خلاف ذلك
+  if (ranges.some(r => r.length !== len)) return '#VALUE!';
   let count = 0;
   for (let i = 0; i < len; i++) {
     let matchAll = true;
@@ -155,11 +205,11 @@ const HELPERS = {
   }
   return count;
 }`
-  },
+    },
 
-  // _datedif: الفرق بين تاريخين
-  _datedif: {
-    code: `function _datedif(start, end, unit) {
+    // _datedif: الفرق بين تاريخين
+    _datedif: {
+      code: `function _datedif(start, end, unit) {
   const s = start instanceof Date ? start : new Date(start);
   const e = end instanceof Date ? end : new Date(end);
   const u = String(unit).toUpperCase();
@@ -203,31 +253,31 @@ const HELPERS = {
     default: return '#NUM!';
   }
 }`
-  },
+    },
 
-  // _edate: إضافة شهور لتاريخ
-  _edate: {
-    code: `function _edate(start, months) {
+    // _edate: إضافة شهور لتاريخ
+    _edate: {
+      code: `function _edate(start, months) {
   const d = start instanceof Date ? new Date(start.getTime()) : new Date(start);
   const targetMonth = d.getMonth() + Number(months);
   const result = new Date(d.getFullYear(), targetMonth, d.getDate());
   if (result.getDate() !== d.getDate()) result.setDate(0);
   return result;
 }`
-  },
+    },
 
-  // _isError: فحص قيم الخطأ
-  _isError: {
-    code: `function _isError(value) {
+    // _isError: فحص قيم الخطأ
+    _isError: {
+      code: `function _isError(value) {
   const errStrings = ['#N/A', '#REF!', '#NUM!', '#VALUE!', '#DIV/0!', '#NAME?'];
   if (typeof value === 'string' && errStrings.includes(value)) return true;
   if (value instanceof Error) return true;
   if (typeof value === 'number' && (isNaN(value) || !isFinite(value))) return true;
   return false;
 }`
-  }
-};
+    }
+  };
 
-global.HELPERS = HELPERS;
-if (typeof module !== 'undefined' && module.exports) module.exports = { HELPERS };
+  global.HELPERS = HELPERS;
+  if (typeof module !== 'undefined' && module.exports) module.exports = { HELPERS };
 })(typeof window !== 'undefined' ? window : globalThis);

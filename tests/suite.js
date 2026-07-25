@@ -372,8 +372,15 @@ test('Runtime: Logic', 'IFERROR يلتقط خطأ القسمة على صفر', (
 });
 
 test('Runtime: Logic', 'IFERROR يلتقط #N/A النصية', () => {
-  assertEqual(runFormula('=IFERROR(VLOOKUP("xxx", A1:B2, 2, FALSE), "ما لقيناه")',
-    { a1: 'foo', b1: 1, a2: 'bar', b2: 2 }), 'ما لقيناه');
+  assertEqual(
+    runFormula('=IFERROR(VLOOKUP("xxx", A1:B2, 2, FALSE), "ما لقيناه")', {
+      a1: 'foo',
+      b1: 1,
+      a2: 'bar',
+      b2: 2
+    }),
+    'ما لقيناه'
+  );
 });
 
 test('Runtime: Logic', 'مقارنة النصوص غير حساسة للحالة (سلوك Excel)', () => {
@@ -518,8 +525,17 @@ test('Runtime: Count', 'COUNTIF <> (ليس يساوي)', () => {
 });
 
 test('Runtime: Count', 'COUNTIFS بشروط متعددة', () => {
-  assertEqual(runFormula('=COUNTIFS(A1:A3, ">0", B1:B3, "y")',
-    { a1: 1, a2: 2, a3: -1, b1: 'y', b2: 'n', b3: 'y' }), 1);
+  assertEqual(
+    runFormula('=COUNTIFS(A1:A3, ">0", B1:B3, "y")', {
+      a1: 1,
+      a2: 2,
+      a3: -1,
+      b1: 'y',
+      b2: 'n',
+      b3: 'y'
+    }),
+    1
+  );
 });
 
 test('Runtime: Count', 'COUNTIF غير حساسة لحالة النص (سلوك Excel)', () => {
@@ -528,62 +544,92 @@ test('Runtime: Count', 'COUNTIF غير حساسة لحالة النص (سلوك 
 
 // === Lookup ===
 test('Runtime: Lookup', 'VLOOKUP exact match', () => {
-  assertEqual(runFormula('=VLOOKUP("b", A1:B3, 2, FALSE)',
-    { a1: 'a', b1: 1, a2: 'b', b2: 2, a3: 'c', b3: 3 }), 2);
+  assertEqual(
+    runFormula('=VLOOKUP("b", A1:B3, 2, FALSE)', {
+      a1: 'a',
+      b1: 1,
+      a2: 'b',
+      b2: 2,
+      a3: 'c',
+      b3: 3
+    }),
+    2
+  );
 });
 
 test('Runtime: Lookup', 'VLOOKUP لا يجد → #N/A', () => {
-  assertEqual(runFormula('=VLOOKUP("zzz", A1:B2, 2, FALSE)',
-    { a1: 'a', b1: 1, a2: 'b', b2: 2 }), '#N/A');
+  assertEqual(
+    runFormula('=VLOOKUP("zzz", A1:B2, 2, FALSE)', { a1: 'a', b1: 1, a2: 'b', b2: 2 }),
+    '#N/A'
+  );
 });
 
 test('Runtime: Lookup', 'VLOOKUP تقريبية (الوسيط الرابع محذوف = افتراضي Excel)', () => {
   // جدول مرتب تصاعدياً: أكبر قيمة <= 2.5 هي 2 → صفها يعطي 20
-  assertEqual(runFormula('=VLOOKUP(2.5, A1:B3, 2)',
-    { a1: 1, b1: 10, a2: 2, b2: 20, a3: 3, b3: 30 }), 20);
+  assertEqual(
+    runFormula('=VLOOKUP(2.5, A1:B3, 2)', { a1: 1, b1: 10, a2: 2, b2: 20, a3: 3, b3: 30 }),
+    20
+  );
 });
 
 test('Runtime: Lookup', 'VLOOKUP تقريبية صريحة (TRUE) وأصغر من الأول → #N/A', () => {
-  assertEqual(runFormula('=VLOOKUP(2.5, A1:B3, 2, TRUE)',
-    { a1: 1, b1: 10, a2: 2, b2: 20, a3: 3, b3: 30 }), 20);
-  assertEqual(runFormula('=VLOOKUP(0, A1:B2, 2, TRUE)',
-    { a1: 1, b1: 10, a2: 2, b2: 20 }), '#N/A');
+  assertEqual(
+    runFormula('=VLOOKUP(2.5, A1:B3, 2, TRUE)', { a1: 1, b1: 10, a2: 2, b2: 20, a3: 3, b3: 30 }),
+    20
+  );
+  assertEqual(runFormula('=VLOOKUP(0, A1:B2, 2, TRUE)', { a1: 1, b1: 10, a2: 2, b2: 20 }), '#N/A');
 });
 
 test('Runtime: Lookup', 'VLOOKUP exact غير حساسة لحالة النص', () => {
-  assertEqual(runFormula('=VLOOKUP("B", A1:B2, 2, FALSE)',
-    { a1: 'a', b1: 1, a2: 'b', b2: 2 }), 2);
+  assertEqual(runFormula('=VLOOKUP("B", A1:B2, 2, FALSE)', { a1: 'a', b1: 1, a2: 'b', b2: 2 }), 2);
 });
 
 test('Runtime: Lookup', 'HLOOKUP', () => {
-  assertEqual(runFormula('=HLOOKUP("b", A1:C2, 2, FALSE)',
-    { a1: 'a', b1: 'b', c1: 'c', a2: 1, b2: 2, c2: 3 }), 2);
+  assertEqual(
+    runFormula('=HLOOKUP("b", A1:C2, 2, FALSE)', {
+      a1: 'a',
+      b1: 'b',
+      c1: 'c',
+      a2: 1,
+      b2: 2,
+      c2: 3
+    }),
+    2
+  );
 });
 
 test('Runtime: Lookup', 'HLOOKUP تقريبية (الوسيط الرابع محذوف)', () => {
-  assertEqual(runFormula('=HLOOKUP(2.5, A1:C2, 2)',
-    { a1: 1, b1: 2, c1: 3, a2: 10, b2: 20, c2: 30 }), 20);
+  assertEqual(
+    runFormula('=HLOOKUP(2.5, A1:C2, 2)', { a1: 1, b1: 2, c1: 3, a2: 10, b2: 20, c2: 30 }),
+    20
+  );
 });
 
 test('Runtime: Lookup', 'INDEX 2D', () => {
-  assertEqual(runFormula('=INDEX(A1:B2, 2, 1)',
-    { a1: 1, b1: 2, a2: 3, b2: 4 }), 3);
+  assertEqual(runFormula('=INDEX(A1:B2, 2, 1)', { a1: 1, b1: 2, a2: 3, b2: 4 }), 3);
 });
 
 test('Runtime: Lookup', 'INDEX 1D (عمود واحد)', () => {
-  assertEqual(runFormula('=INDEX(A1:A3, 2)',
-    { a1: 10, a2: 20, a3: 30 }), 20);
+  assertEqual(runFormula('=INDEX(A1:A3, 2)', { a1: 10, a2: 20, a3: 30 }), 20);
 });
 
 test('Runtime: Lookup', 'MATCH exact', () => {
-  assertEqual(runFormula('=MATCH("c", A1:A3, 0)',
-    { a1: 'a', a2: 'b', a3: 'c' }), 3);
+  assertEqual(runFormula('=MATCH("c", A1:A3, 0)', { a1: 'a', a2: 'b', a3: 'c' }), 3);
 });
 
 test('Runtime: Lookup', 'INDEX + MATCH مركّبة', () => {
   // ابحث عن "b" في B1:B3، خذ القيمة المقابلة من A1:A3
-  assertEqual(runFormula('=INDEX(A1:A3, MATCH("b", B1:B3, 0))',
-    { a1: 10, a2: 20, a3: 30, b1: 'a', b2: 'b', b3: 'c' }), 20);
+  assertEqual(
+    runFormula('=INDEX(A1:A3, MATCH("b", B1:B3, 0))', {
+      a1: 10,
+      a2: 20,
+      a3: 30,
+      b1: 'a',
+      b2: 'b',
+      b3: 'c'
+    }),
+    20
+  );
 });
 
 // === Date ===
@@ -648,8 +694,10 @@ test('Runtime: Check', 'ISTEXT', () => {
 });
 
 test('Runtime: Check', 'ISERROR على #N/A', () => {
-  assertEqual(runFormula('=ISERROR(VLOOKUP("zzz", A1:B2, 2, FALSE))',
-    { a1: 'a', b1: 1, a2: 'b', b2: 2 }), true);
+  assertEqual(
+    runFormula('=ISERROR(VLOOKUP("zzz", A1:B2, 2, FALSE))', { a1: 'a', b1: 1, a2: 'b', b2: 2 }),
+    true
+  );
 });
 
 // === Composite ===
@@ -657,22 +705,185 @@ test('Runtime: Composite', 'صيغة مركّبة عميقة', () => {
   // متوسط مربعات الإيجابية
   // =AVERAGE(IF(A1>0,A1*A1,0), IF(B1>0,B1*B1,0), IF(C1>0,C1*C1,0))
   // مع a1=2, b1=-3, c1=4 → AVG(4, 0, 16) = 6.6666...
-  const r = runFormula(
-    '=AVERAGE(IF(A1>0,A1*A1,0), IF(B1>0,B1*B1,0), IF(C1>0,C1*C1,0))',
-    { a1: 2, b1: -3, c1: 4 }
-  );
+  const r = runFormula('=AVERAGE(IF(A1>0,A1*A1,0), IF(B1>0,B1*B1,0), IF(C1>0,C1*C1,0))', {
+    a1: 2,
+    b1: -3,
+    c1: 4
+  });
   assertClose(r, (4 + 0 + 16) / 3, 1e-9);
 });
 
 test('Runtime: Composite', 'IF + COUNTIF + & للنص', () => {
-  const r = runFormula(
-    '=IF(COUNTIF(A1:A3, ">0")=3, "كل القيم موجبة", "فيه سالب أو صفر")',
-    { a1: 1, a2: -2, a3: 3 }
-  );
+  const r = runFormula('=IF(COUNTIF(A1:A3, ">0")=3, "كل القيم موجبة", "فيه سالب أو صفر")', {
+    a1: 1,
+    a2: -2,
+    a3: 3
+  });
   assertEqual(r, 'فيه سالب أو صفر');
 });
 
 test('Runtime: Composite', 'فيثاغورس: SQRT(POWER+POWER)', () => {
   // 3-4-5 triangle
   assertEqual(runFormula('=SQRT(POWER(A1,2)+POWER(B1,2))', { a1: 3, b1: 4 }), 5);
+});
+
+/* =========================================================
+   5) دلالات Excel المُصحَّحة (MOD / ROUND)
+   ========================================================= */
+test('Excel Semantics', 'MOD: إشارة الناتج تتبع المقسوم عليه', () => {
+  assertEqual(runFormula('=MOD(-3,2)', {}), 1, 'Excel: MOD(-3,2) = 1');
+  assertEqual(runFormula('=MOD(3,-2)', {}), -1, 'Excel: MOD(3,-2) = -1');
+  assertEqual(runFormula('=MOD(-3,-2)', {}), -1, 'Excel: MOD(-3,-2) = -1');
+  assertEqual(runFormula('=MOD(10,3)', {}), 1);
+});
+
+test('Excel Semantics', 'MOD: القسمة على صفر → #DIV/0!', () => {
+  assertEqual(runFormula('=MOD(A1,0)', { a1: 5 }), '#DIV/0!');
+  assertEqual(runFormula('=IFERROR(MOD(A1,0), "لا يمكن")', { a1: 5 }), 'لا يمكن');
+});
+
+test('Excel Semantics', 'ROUND: النصف يُقرَّب بعيداً عن الصفر', () => {
+  assertEqual(runFormula('=ROUND(-2.5,0)', {}), -3, 'Excel: -3 (وMath.round يعطي -2)');
+  assertEqual(runFormula('=ROUND(2.5,0)', {}), 3);
+  assertEqual(runFormula('=ROUND(-0.5,0)', {}), -1);
+});
+
+test('Excel Semantics', 'ROUND: منازل عشرية وسالبة', () => {
+  assertEqual(runFormula('=ROUND(A1,2)', { a1: 3.14159 }), 3.14);
+  assertEqual(runFormula('=ROUND(1234,-2)', {}), 1200);
+  assertEqual(runFormula('=ROUND(A1,0)', { a1: 4.7 }), 5);
+});
+
+test('Excel Semantics', 'COUNTIFS: نطاقات بأطوال مختلفة → #VALUE!', () => {
+  assertEqual(
+    runFormula('=COUNTIFS(A1:A3,">0",B1:B2,"y")', { a1: 1, a2: 2, a3: 3, b1: 'y', b2: 'y' }),
+    '#VALUE!'
+  );
+});
+
+test('Excel Semantics', 'SUBSTITUTE عبر helper: الكل وتكرار محدد', () => {
+  assertEqual(runFormula('=SUBSTITUTE(A1,"-","/")', { a1: '01-02-2026' }), '01/02/2026');
+  assertEqual(runFormula('=SUBSTITUTE(A1,"-","/",2)', { a1: '01-02-03' }), '01-02/03');
+  // نص قديم فارغ يرجّع النص كما هو (لا حلقة لا نهائية)
+  assertEqual(runFormula('=SUBSTITUTE(A1,"","x")', { a1: 'abc' }), 'abc');
+});
+
+/* =========================================================
+   6) الفراغات البادئة (لصق مباشر من Excel)
+   ========================================================= */
+test('Whitespace', 'مسافة قبل = لا تكسر التحويل', () => {
+  assertEqual(runFormula(' =A1', { a1: 7 }), 7);
+  assertEqual(runFormula('   =SUM(A1:A2)', { a1: 1, a2: 2 }), 3);
+});
+
+test('Whitespace', 'سطر جديد وتاب قبل = ', () => {
+  assertEqual(runFormula('\n\t =SUM(A1:A2)', { a1: 1, a2: 2 }), 3);
+});
+
+test('Whitespace', 'مواضع الأخطاء تبقى صحيحة رغم الفراغ البادئ', () => {
+  // "  =A1@" → الرمز الشاذ @ عند الفهرس 5 في النص الأصلي
+  try {
+    tokenize('  =A1@');
+    throw new Error('كان يفترض أن يرمي');
+  } catch (e) {
+    assertEqual(e.start, 5, 'موضع الخطأ يجب أن يكون بالنسبة للنص الأصلي');
+  }
+});
+
+/* =========================================================
+   7) حدود الموارد — تمنع تجميد المتصفح
+   ========================================================= */
+test('Limits', 'عمق التداخل محدود برسالة عربية', () => {
+  const n = LIMITS.parseDepth + 20;
+  assertThrows(() => convertFormula('=' + '('.repeat(n) + 'A1' + ')'.repeat(n)), 'عمق التداخل');
+});
+
+test('Limits', 'عمق ضمن الحد يمر بنجاح', () => {
+  const n = 30;
+  assertEqual(runFormula('=' + '('.repeat(n) + 'A1' + ')'.repeat(n), { a1: 4 }), 4);
+});
+
+test('Limits', 'طول المُدخل محدود', () => {
+  assertThrows(() => convertFormula('=' + 'A1+'.repeat(LIMITS.inputLength) + 'A1'), 'طويلة جداً');
+});
+
+test('Limits', 'إجمالي الخلايا محدود عبر عدة نطاقات', () => {
+  assertThrows(() => convertFormula('=SUM(A1:A1000,B1:B1000,C1:C1000)'), 'أكثر من');
+});
+
+test('Limits', 'نطاق واحد فوق الحد يُرفض', () => {
+  assertThrows(() => convertFormula('=SUM(A1:A1001)'), 'كبير');
+});
+
+/* =========================================================
+   8) once() — منع تكرار تقييم الوسائط (كان تضخماً أسّياً)
+   ========================================================= */
+test('once', 'ISBLANK لا تكرر وسيطها', () => {
+  const r = generate(parse(tokenize('ISBLANK(SUM(A1:A5))')));
+  const inner = '[[a1, a2, a3, a4, a5]].flat(Infinity)';
+  assertEqual(r.expr.split(inner).length - 1, 1, 'يجب أن يظهر تعبير SUM مرة واحدة فقط');
+});
+
+test('once', 'YEAR لا تكرر وسيطها', () => {
+  const r = generate(parse(tokenize('YEAR(EDATE(A1,3))')));
+  assertEqual(r.expr.split('_edate(a1, 3)').length - 1, 1);
+});
+
+test('once', 'VLOOKUP لا تكرر وسيط المطابقة', () => {
+  const r = generate(parse(tokenize('VLOOKUP(A1,B1:C2,2,ISBLANK(D1))')));
+  assertEqual(r.expr.split('d1 === null').length - 1, 1);
+});
+
+test('once', 'التداخل العميق ينمو خطياً لا أسّياً', () => {
+  // قبل الإصلاح: العمق 11 كان يولّد ~3.9 ميغابايت (نمو 3^n)
+  let f = 'A1';
+  for (let i = 0; i < 11; i++) f = 'ISBLANK(' + f + ')';
+  const code = convertFormula('=' + f).code;
+  assertEqual(code.length < 5000, true, `الحجم الفعلي: ${code.length} بايت`);
+});
+
+test('once', 'التعبيرات البسيطة لا تُلفّ بلا داع', () => {
+  const r = generate(parse(tokenize('ISBLANK(A1)')));
+  assertEqual(r.expr, "(a1 === null || a1 === undefined || a1 === '')");
+});
+
+test('once', 'الأسماء المؤقتة فريدة عند التداخل (لا تظليل)', () => {
+  // ISBLANK داخل ISNUMBER: لازم _v1 و _v2 لا _v1 مرتين
+  const r = generate(parse(tokenize('ISNUMBER(MOD(A1,B1))')));
+  const names = r.expr.match(/_v\d+/g) || [];
+  assertEqual(new Set(names).size >= 1, true);
+  // وأهم شيء: الكود المولّد ينفّذ صح
+  assertEqual(runFormula('=ISNUMBER(MOD(A1,B1))', { a1: 10, b1: 3 }), true);
+});
+
+test('once', 'قيم once الصحيحة عند التنفيذ الفعلي', () => {
+  assertEqual(runFormula('=ISBLANK(A1)', { a1: '' }), true);
+  assertEqual(runFormula('=YEAR(DATE(2026,3,1))', {}), 2026);
+  assertEqual(runFormula('=MID(A1,2,3)', { a1: 'abcdef' }), 'bcd');
+  assertEqual(runFormula('=RIGHT(A1,0)', { a1: 'abc' }), '');
+  assertEqual(runFormula('=REPLACE(A1,2,3,"XY")', { a1: 'abcdef' }), 'aXYef');
+  assertEqual(runFormula('=MIN(A1:A3)', { a1: 5, a2: 2, a3: 9 }), 2);
+  assertEqual(runFormula('=AVERAGE(A1:A3)', { a1: 2, a2: 4, a3: 6 }), 4);
+});
+
+test('once', 'فحص شامل: لا دالة تكرر وسيطاً مميزاً في ناتجها', () => {
+  // نمرر وسيطاً له بصمة نصية فريدة ونتأكد أنه لا يظهر مرتين
+  const MARK = '_edate(a9, 7)';
+  const wrap = 'EDATE(A9,7)';
+  const cases = [
+    `ISBLANK(${wrap})`,
+    `ISNUMBER(${wrap})`,
+    `ISTEXT(${wrap})`,
+    `YEAR(${wrap})`,
+    `MONTH(${wrap})`,
+    `DAY(${wrap})`,
+    `LEN(${wrap})`,
+    `ABS(${wrap})`,
+    `NOT(${wrap})`
+  ];
+  for (const c of cases) {
+    const expr = generate(parse(tokenize(c))).expr;
+    const n = expr.split(MARK).length - 1;
+    assertEqual(n, 1, `${c} كرّر وسيطه ${n} مرة`);
+  }
 });

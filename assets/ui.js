@@ -3,303 +3,559 @@
    ------------------------------------------------------------
    يعتمد على HELPERS/FUNCTIONS/tokenize/convertFormula
    (تُحمَّل قبله من assets/helpers.js و functions.js و engine.js).
+
+   مبدآن أساسيان في هذا الملف:
+   1) لا يُستخدم innerHTML إطلاقاً — كل شيء يُبنى بعقد DOM و
+      textContent. هذا يلغي فئة كاملة من الأخطاء (كان تلوين
+      الأرقام بالـ regex يشطر الكيان &#39; فتظهر حرفياً).
+   2) كل منطق DOM داخل initUI(root) لتبقى الوحدة قابلة
+      للاستيراد والاختبار خارج المتصفح.
+
    ملاحظة: تفضيل الثيم يُطبَّق مبكراً بسكربت مضمّن في <head>
    لمنع وميض الوضع الفاتح؛ هنا نزامن أيقونة الزر فقط.
    ============================================================ */
+(function (global) {
+  'use strict';
 
-const $input        = document.getElementById('formula-input');
-const $highlight    = document.getElementById('editor-highlight');
-const $output       = document.getElementById('output-wrap');
-const $outputInfo   = document.getElementById('output-info');
-const $status       = document.getElementById('status');
-const $btnConvert   = document.getElementById('btn-convert');
-const $btnCopy      = document.getElementById('btn-copy');
-const $btnClear     = document.getElementById('btn-clear');
-const $toast        = document.getElementById('toast');
+  const CAT_LABELS = {
+    logic: 'منطقية',
+    math: 'رياضية',
+    text: 'نصية',
+    count: 'عدّ',
+    date: 'تاريخ',
+    lookup: 'بحث',
+    check: 'فحص'
+  };
 
-let lastCode = '';
+  const DARK_KEY = 'excel-converter-theme';
+  const AUTO_CONVERT_DELAY = 300;
+  const UNDO_WINDOW = 8000;
 
-// عدد الدوال يُحسب من القاموس نفسه — مصدر حقيقة واحد
-const FN_COUNT = Object.keys(FUNCTIONS).length;
-document.getElementById('fn-count-badge').textContent = `${FN_COUNT} دالة`;
-document.getElementById('fn-count-section').textContent = FN_COUNT;
-document.getElementById('fn-count-footer').textContent = FN_COUNT;
+  /* ============================================================
+   tokenizeJS — مُقسِّم صغير لعرض كود JS ملوّناً
+   ------------------------------------------------------------
+   بديل عن سلسلة regex.replace على HTML مُهرَّب. مسار واحد،
+   والبدائل مرتّبة بحيث تفوز التعليقات ثم النصوص، فلا تتداخل
+   الـ spans ولا تُشطر الكيانات.
+   يرجّع [{ cls, text }] — cls فارغة تعني نصاً عادياً.
+   ============================================================ */
+  const JS_TOKEN_RE = new RegExp(
+    [
+      /(\/\/[^\n]*)/, // 1 تعليق
+      /('(?:[^'\\\n]|\\.)*'|"(?:[^"\\\n]|\\.)*")/, // 2 نص
+      /\b(function|return|const|let|var|if|else|for|while|switch|case|break|default|try|catch|throw|new|typeof|true|false|null|undefined)\b/, // 3 كلمة مفتاحية
+      /\b(Math|Number|String|Array|Date|Object|JSON|isNaN|isFinite)\b/, // 4 مدمجة
+      /(\d+\.?\d*)/ // 5 رقم
+    ]
+      .map((r) => r.source)
+      .join('|'),
+    'g'
+  );
 
-const CAT_LABELS = {
-  logic: 'منطقية', math: 'رياضية', text: 'نصية',
-  count: 'عدّ', date: 'تاريخ', lookup: 'بحث', check: 'فحص'
-};
+  const JS_TOKEN_CLASSES = [
+    'code-comment',
+    'code-string',
+    'code-keyword',
+    'code-fn',
+    'code-number'
+  ];
 
-function escapeHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-          .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
-
-function renderHighlight(input, errorRange = null) {
-  if (!input) { $highlight.innerHTML = ''; return; }
-  if (errorRange) {
-    const { start, end } = errorRange;
-    const before = input.slice(0, start);
-    const errPart = input.slice(start, Math.max(end, start + 1));
-    const after = input.slice(Math.max(end, start + 1));
-    $highlight.innerHTML =
-      escapeHtml(before) +
-      `<span class="err-mark">${escapeHtml(errPart) || '⚠'}</span>` +
-      escapeHtml(after);
-    return;
-  }
-
-  try {
-    const tokens = tokenize(input);
-    let html = '';
-    let cursor = 0;
-    if (input.startsWith('=')) {
-      html += `<span class="tk-op">=</span>`;
-      cursor = 1;
-    }
-    for (const t of tokens) {
-      if (t.start > cursor) {
-        html += escapeHtml(input.slice(cursor, t.start));
+  function tokenizeJS(code) {
+    const out = [];
+    let last = 0;
+    let m;
+    JS_TOKEN_RE.lastIndex = 0;
+    while ((m = JS_TOKEN_RE.exec(code)) !== null) {
+      if (m.index > last) out.push({ cls: '', text: code.slice(last, m.index) });
+      let cls = '';
+      for (let g = 1; g <= JS_TOKEN_CLASSES.length; g++) {
+        if (m[g] !== undefined) {
+          cls = JS_TOKEN_CLASSES[g - 1];
+          break;
+        }
       }
-      const cls = {
-        FUNCTION: 'tk-fn', NUMBER: 'tk-num', STRING: 'tk-str',
-        CELL_REF: 'tk-cell', RANGE: 'tk-cell',
-        OPERATOR: 'tk-op', OPERATOR_CMP: 'tk-op',
-        COMMA: 'tk-op', LPAREN: 'tk-paren', RPAREN: 'tk-paren',
-        BOOLEAN: 'tk-num'
-      }[t.type] || '';
-      html += `<span class="${cls}">${escapeHtml(t.raw)}</span>`;
-      cursor = t.end;
+      out.push({ cls, text: m[0] });
+      last = JS_TOKEN_RE.lastIndex;
     }
-    if (cursor < input.length) html += escapeHtml(input.slice(cursor));
-    $highlight.innerHTML = html;
-  } catch {
-    $highlight.innerHTML = escapeHtml(input);
+    if (last < code.length) out.push({ cls: '', text: code.slice(last) });
+    return out;
   }
-}
 
-function highlightJS(code) {
-  let result = escapeHtml(code);
-  result = result.replace(/(\/\/[^\n]*)/g, '<span class="code-comment">$1</span>');
-  result = result.replace(/(&quot;(?:[^&]|&(?!quot;))*&quot;|&#39;(?:[^&]|&(?!#39;))*&#39;)/g, (match) => {
-    if (match.includes('code-comment')) return match;
-    return `<span class="code-string">${match}</span>`;
-  });
-  result = result.replace(
-    /\b(function|return|const|let|var|if|else|for|while|switch|case|break|default|try|catch|throw|new|typeof|true|false|null|undefined)\b/g,
-    '<span class="code-keyword">$1</span>'
-  );
-  result = result.replace(/\b(\d+\.?\d*)\b/g, '<span class="code-number">$1</span>');
-  result = result.replace(
-    /\b(Math|Number|String|Array|Date|Object|JSON|isNaN|isFinite)\b/g,
-    '<span class="code-fn">$1</span>'
-  );
-  return result;
-}
+  // أصناف تلوين رموز صيغة Excel في المحرر
+  const FORMULA_TOKEN_CLASSES = {
+    FUNCTION: 'tk-fn',
+    NUMBER: 'tk-num',
+    STRING: 'tk-str',
+    CELL_REF: 'tk-cell',
+    RANGE: 'tk-cell',
+    OPERATOR: 'tk-op',
+    OPERATOR_CMP: 'tk-op',
+    COMMA: 'tk-op',
+    LPAREN: 'tk-paren',
+    RPAREN: 'tk-paren',
+    BOOLEAN: 'tk-num'
+  };
 
-function showOutput(code) {
-  if (!code) {
-    $output.innerHTML = '<div class="code-empty">سيظهر الكود هنا بعد التحويل…</div>';
-    $outputInfo.style.display = 'none';
-    return;
-  }
-  const lines = code.split('\n');
-  const lineNumbers = lines.map((_, i) => `<div>${i + 1}</div>`).join('');
-  const highlighted = highlightJS(code);
-  $output.innerHTML = `
-    <div class="code-block">
-      <div class="line-numbers">${lineNumbers}</div>
-      <div class="code-content">${highlighted}</div>
-    </div>
-  `;
-}
+  /* ============================================================
+   initUI — كل ما يلمس الـ DOM
+   ============================================================ */
+  function initUI(root) {
+    const doc = root || (typeof document !== 'undefined' ? document : null);
+    if (!doc) throw new Error('initUI يحتاج مستنداً (document)');
+    const win = doc.defaultView || (typeof window !== 'undefined' ? window : undefined);
 
-function showOutputInfo(usedCells, usedHelpers) {
-  const items = [];
-  items.push(`<span class="info-item">📥 الباراميترات: <code>${usedCells.length ? usedCells.join(', ') : '(لا شيء)'}</code></span>`);
-  if (usedHelpers && usedHelpers.length > 0) {
-    items.push(`<span class="info-item">🔧 Helpers مولّدة: <code>${usedHelpers.join(', ')}</code></span>`);
-  }
-  $outputInfo.innerHTML = items.join('');
-  $outputInfo.style.display = 'flex';
-}
+    const FUNCTIONS = global.FUNCTIONS;
+    const tokenize = global.tokenize;
+    const convertFormula = global.convertFormula;
 
-function showStatus(type, html) {
-  $status.className = `status show ${type}`;
-  $status.innerHTML = html;
-}
-function hideStatus() {
-  $status.className = 'status';
-  $status.innerHTML = '';
-}
+    const $ = (id) => doc.getElementById(id);
 
-function doConvert() {
-  const input = $input.value;
-  hideStatus();
-  renderHighlight(input);
+    const $input = $('formula-input');
+    const $highlight = $('editor-highlight');
+    const $output = $('output-wrap');
+    const $outputInfo = $('output-info');
+    const $status = $('status');
+    const $btnConvert = $('btn-convert');
+    const $btnCopy = $('btn-copy');
+    const $btnClear = $('btn-clear');
+    const $btnUndo = $('btn-undo');
+    const $toast = $('toast');
+    const $examples = $('examples-grid');
+    const $refBody = $('ref-table-body');
+    const $refControls = $('ref-controls');
+    const $refSearch = $('ref-search');
+    const $themeToggle = $('theme-toggle');
 
-  try {
-    const { code, usedCells, usedHelpers } = convertFormula(input);
-    lastCode = code;
-    showOutput(code);
-    showOutputInfo(usedCells, usedHelpers);
-    let msg = `<strong>✓ نجح التحويل.</strong> الدالة <code>calculate</code> جاهزة.`;
-    if (usedHelpers.length > 0) msg += ` (مع ${usedHelpers.length} helpers)`;
-    showStatus('success', msg);
-  } catch (e) {
-    lastCode = '';
-    showOutput('');
-    if (typeof e.start === 'number') {
-      renderHighlight(input, { start: e.start, end: e.end || e.start + 1 });
+    let lastCode = '';
+    let clearedValue = null;
+    let undoTimer = null;
+    let convertTimer = null;
+    let highlightFrame = null;
+
+    /* ----- أدوات DOM صغيرة ----- */
+    function clear(node) {
+      while (node.firstChild) node.removeChild(node.firstChild);
     }
-    let msg = `<strong>✗ خطأ:</strong> ${escapeHtml(e.message)}`;
-    if (e.unsupported) {
-      msg += `<br><small>الدوال المدعومة: ${Object.keys(FUNCTIONS).join('، ')}</small>`;
+    function el(tag, className, text) {
+      const n = doc.createElement(tag);
+      if (className) n.className = className;
+      if (text !== undefined) n.textContent = text;
+      return n;
     }
-    showStatus('error', msg);
-  }
-}
 
-function showToast(text) {
-  $toast.textContent = text;
-  $toast.classList.add('show');
-  setTimeout(() => $toast.classList.remove('show'), 1800);
-}
+    /* ----- عدد الدوال: مصدر حقيقة واحد ----- */
+    const FN_COUNT = Object.keys(FUNCTIONS).length;
+    $('fn-count-badge').textContent = `${FN_COUNT} دالة`;
+    $('fn-count-section').textContent = String(FN_COUNT);
+    $('fn-count-footer').textContent = String(FN_COUNT);
 
-async function copyCode() {
-  if (!lastCode) { showToast('لا يوجد كود لنسخه'); return; }
-  try {
-    await navigator.clipboard.writeText(lastCode);
-    showToast('تم النسخ ✓');
-  } catch {
-    const ta = document.createElement('textarea');
-    ta.value = lastCode;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    showToast('تم النسخ ✓');
-  }
-}
+    /* ----- تظليل الصيغة في المحرر ----- */
+    function renderHighlight(input, errorRange) {
+      clear($highlight);
+      if (!input) return;
 
-$btnConvert.addEventListener('click', doConvert);
-$btnCopy.addEventListener('click', copyCode);
-$btnClear.addEventListener('click', () => {
-  $input.value = '';
-  renderHighlight('');
-  showOutput('');
-  hideStatus();
-  $input.focus();
-});
-$input.addEventListener('input', () => renderHighlight($input.value));
-$input.addEventListener('scroll', () => {
-  $highlight.scrollTop = $input.scrollTop;
-  $highlight.scrollLeft = $input.scrollLeft;
-});
-$input.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-    e.preventDefault();
-    doConvert();
-  }
-});
+      if (errorRange) {
+        const { start, end } = errorRange;
+        const stop = Math.max(end, start + 1);
+        $highlight.appendChild(doc.createTextNode(input.slice(0, start)));
+        const mark = el('span', 'err-mark', input.slice(start, stop) || '⚠');
+        $highlight.appendChild(mark);
+        $highlight.appendChild(doc.createTextNode(input.slice(stop)));
+        return;
+      }
 
-/* ----- بناء الأمثلة السريعة ----- */
-const EXAMPLES = [
-  { label: 'شرط بسيط',          cat: 'logic',  formula: '=IF(A1>10,"كبير","صغير")' },
-  { label: 'مجموع نطاق',        cat: 'math',   formula: '=SUM(A1:A10)' },
-  { label: 'متوسط',             cat: 'math',   formula: '=AVERAGE(B1:B5)' },
-  { label: 'دمج نصوص',          cat: 'text',   formula: '=CONCATENATE("الإجمالي: ",A1," ر.س")' },
-  { label: 'بحث عمودي',         cat: 'lookup', formula: '=VLOOKUP(A2,B1:D10,3,FALSE)' },
-  { label: 'بحث + INDEX/MATCH', cat: 'lookup', formula: '=INDEX(C1:C10,MATCH(A2,B1:B10,0))' },
-  { label: 'عدّ بشرط',          cat: 'count',  formula: '=COUNTIF(A1:A20,">100")' },
-  { label: 'عدّ بشروط متعددة',  cat: 'count',  formula: '=COUNTIFS(A1:A10,">0",B1:B10,"معتمد")' },
-  { label: 'استخراج جزء نص',    cat: 'text',   formula: '=MID(A1,3,5)' },
-  { label: 'استبدال نص',        cat: 'text',   formula: '=SUBSTITUTE(A1,"-","/")' },
-  { label: 'الفرق بين تاريخين', cat: 'date',   formula: '=DATEDIF(A1,B1,"D")' },
-  { label: 'إضافة شهور',        cat: 'date',   formula: '=EDATE(A1,3)' },
-  { label: 'سنة من تاريخ',      cat: 'date',   formula: '=YEAR(TODAY())' },
-  { label: 'تاريخ مخصص',        cat: 'date',   formula: '=DATE(2026,6,15)' },
-  { label: 'فحص خلية فارغة',    cat: 'check',  formula: '=IF(ISBLANK(A1),"فارغ","موجود")' },
-  { label: 'فحص رقم',           cat: 'check',  formula: '=IF(ISNUMBER(A1),A1*2,0)' },
-  { label: 'الجذر التربيعي',    cat: 'math',   formula: '=SQRT(POWER(A1,2)+POWER(B1,2))' },
-  { label: 'باقي القسمة',       cat: 'math',   formula: '=IF(MOD(A1,2)=0,"زوجي","فردي")' }
-];
+      let tokens;
+      try {
+        tokens = tokenize(input);
+      } catch (e) {
+        $highlight.appendChild(doc.createTextNode(input));
+        return;
+      }
 
-const $examples = document.getElementById('examples-grid');
-EXAMPLES.forEach(ex => {
-  const card = document.createElement('div');
-  card.className = 'example-card';
-  card.innerHTML = `
-    <div class="label">
-      ${escapeHtml(ex.label)}
-      <span class="cat-pill ref-cat ${ex.cat}">${CAT_LABELS[ex.cat]}</span>
-    </div>
-    <div class="formula">${escapeHtml(ex.formula)}</div>
-  `;
-  card.addEventListener('click', () => {
-    $input.value = ex.formula;
-    renderHighlight(ex.formula);
-    $input.focus();
-    doConvert();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  });
-  $examples.appendChild(card);
-});
+      let cursor = 0;
+      for (const t of tokens) {
+        if (t.start > cursor) {
+          $highlight.appendChild(doc.createTextNode(input.slice(cursor, t.start)));
+        }
+        const cls = FORMULA_TOKEN_CLASSES[t.type] || '';
+        $highlight.appendChild(cls ? el('span', cls, t.raw) : doc.createTextNode(t.raw));
+        cursor = t.end;
+      }
+      if (cursor < input.length) {
+        $highlight.appendChild(doc.createTextNode(input.slice(cursor)));
+      }
+    }
 
-/* ----- جدول المرجع مع التصفية ----- */
-const $refBody = document.getElementById('ref-table-body');
-Object.entries(FUNCTIONS).forEach(([name, info]) => {
-  const tr = document.createElement('tr');
-  tr.dataset.cat = info.cat;
-  tr.innerHTML = `
-    <td><span class="ref-cat ${info.cat}">${CAT_LABELS[info.cat]}</span></td>
-    <td><span class="fn-name">${name}</span></td>
-    <td><span class="js-equiv">${escapeHtml(info.jsEquiv)}</span></td>
-    <td>${escapeHtml(info.desc)}</td>
-  `;
-  $refBody.appendChild(tr);
-});
+    // التظليل يُجدوَل على إطار الرسم التالي بدل كل ضغطة مفتاح
+    function scheduleHighlight() {
+      if (!win || !win.requestAnimationFrame) {
+        renderHighlight($input.value);
+        return;
+      }
+      if (highlightFrame !== null) return;
+      highlightFrame = win.requestAnimationFrame(() => {
+        highlightFrame = null;
+        renderHighlight($input.value);
+      });
+    }
 
-const $refControls = document.getElementById('ref-controls');
-const cats = ['all', ...new Set(Object.values(FUNCTIONS).map(f => f.cat))];
-cats.forEach((cat, idx) => {
-  const btn = document.createElement('button');
-  btn.className = 'filter-btn' + (idx === 0 ? ' active' : '');
-  btn.dataset.cat = cat;
-  btn.setAttribute('aria-pressed', idx === 0 ? 'true' : 'false');
-  const count = cat === 'all'
-    ? Object.keys(FUNCTIONS).length
-    : Object.values(FUNCTIONS).filter(f => f.cat === cat).length;
-  btn.textContent = cat === 'all' ? `الكل (${count})` : `${CAT_LABELS[cat]} (${count})`;
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.filter-btn').forEach(b => {
-      b.classList.remove('active');
-      b.setAttribute('aria-pressed', 'false');
+    /* ----- عرض الكود الناتج ----- */
+    function showOutput(code) {
+      clear($output);
+      if (!code) {
+        $output.appendChild(el('div', 'code-empty', 'سيظهر الكود هنا بعد التحويل…'));
+        $outputInfo.style.display = 'none';
+        return;
+      }
+      const block = el('div', 'code-block');
+
+      const lines = code.split('\n');
+      const numbers = el('div', 'line-numbers');
+      numbers.setAttribute('aria-hidden', 'true');
+      for (let i = 0; i < lines.length; i++) numbers.appendChild(el('div', '', String(i + 1)));
+
+      const content = el('div', 'code-content');
+      for (const t of tokenizeJS(code)) {
+        content.appendChild(t.cls ? el('span', t.cls, t.text) : doc.createTextNode(t.text));
+      }
+
+      block.appendChild(numbers);
+      block.appendChild(content);
+      $output.appendChild(block);
+    }
+
+    function showOutputInfo(usedCells, usedHelpers) {
+      clear($outputInfo);
+      const item = (label, value) => {
+        const span = el('span', 'info-item', label);
+        span.appendChild(el('code', '', value));
+        return span;
+      };
+      $outputInfo.appendChild(
+        item('📥 الباراميترات: ', usedCells.length ? usedCells.join(', ') : '(لا شيء)')
+      );
+      if (usedHelpers && usedHelpers.length > 0) {
+        $outputInfo.appendChild(item('🔧 Helpers مولّدة: ', usedHelpers.join(', ')));
+      }
+      $outputInfo.style.display = 'flex';
+    }
+
+    /* ----- شريط الحالة ----- */
+    function showStatus(type, buildBody) {
+      $status.className = `status show ${type}`;
+      clear($status);
+      buildBody($status);
+    }
+    function hideStatus() {
+      $status.className = 'status';
+      clear($status);
+    }
+
+    /* ----- التحويل ----- */
+    // silent = تحويل تلقائي أثناء الكتابة: نعرض النجاح ونبتلع الأخطاء
+    // (الصيغة نصف المكتوبة خاطئة دائماً، وإظهار الخطأ لكل حرف ضجيج)
+    function doConvert(options) {
+      const silent = !!(options && options.silent);
+      const input = $input.value;
+      if (silent && !input.trim()) {
+        return;
+      }
+
+      try {
+        const { code, usedCells, usedHelpers } = convertFormula(input);
+        lastCode = code;
+        renderHighlight(input);
+        showOutput(code);
+        showOutputInfo(usedCells, usedHelpers);
+        showStatus('success', (box) => {
+          box.appendChild(el('strong', '', '✓ نجح التحويل.'));
+          box.appendChild(doc.createTextNode(' الدالة '));
+          box.appendChild(el('code', '', 'calculate'));
+          box.appendChild(
+            doc.createTextNode(
+              ' جاهزة.' + (usedHelpers.length ? ` (مع ${usedHelpers.length} helpers)` : '')
+            )
+          );
+        });
+      } catch (e) {
+        lastCode = '';
+        if (silent) {
+          hideStatus();
+          showOutput('');
+          renderHighlight(input);
+          return;
+        }
+        showOutput('');
+        if (typeof e.start === 'number') {
+          renderHighlight(input, { start: e.start, end: e.end || e.start + 1 });
+        } else {
+          renderHighlight(input);
+        }
+        showStatus('error', (box) => {
+          box.appendChild(el('strong', '', '✗ خطأ:'));
+          box.appendChild(doc.createTextNode(' ' + e.message));
+          if (e.unsupported) {
+            box.appendChild(el('br'));
+            box.appendChild(
+              el('small', '', 'الدوال المدعومة: ' + Object.keys(FUNCTIONS).join('، '))
+            );
+          }
+        });
+      }
+    }
+
+    function scheduleConvert() {
+      if (convertTimer) clearTimeout(convertTimer);
+      convertTimer = setTimeout(() => {
+        convertTimer = null;
+        doConvert({ silent: true });
+      }, AUTO_CONVERT_DELAY);
+    }
+
+    /* ----- Toast ----- */
+    let toastTimer = null;
+    function showToast(text) {
+      $toast.textContent = text;
+      $toast.classList.add('show');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => $toast.classList.remove('show'), 1800);
+    }
+
+    /* ----- النسخ ----- */
+    async function copyCode() {
+      if (!lastCode) {
+        showToast('لا يوجد كود لنسخه');
+        return;
+      }
+      try {
+        await win.navigator.clipboard.writeText(lastCode);
+        showToast('تم النسخ ✓');
+      } catch (e) {
+        const ta = el('textarea');
+        ta.value = lastCode;
+        doc.body.appendChild(ta);
+        ta.select();
+        try {
+          doc.execCommand('copy');
+          showToast('تم النسخ ✓');
+        } catch (e2) {
+          showToast('تعذّر النسخ — انسخ يدوياً');
+        }
+        doc.body.removeChild(ta);
+      }
+    }
+
+    /* ----- المسح مع تراجع ----- */
+    function hideUndo() {
+      if (undoTimer) {
+        clearTimeout(undoTimer);
+        undoTimer = null;
+      }
+      clearedValue = null;
+      $btnUndo.hidden = true;
+    }
+
+    $btnClear.addEventListener('click', () => {
+      if (!$input.value) {
+        $input.focus();
+        return;
+      }
+      clearedValue = $input.value;
+      $input.value = '';
+      renderHighlight('');
+      showOutput('');
+      hideStatus();
+      lastCode = '';
+      $btnUndo.hidden = false;
+      if (undoTimer) clearTimeout(undoTimer);
+      undoTimer = setTimeout(hideUndo, UNDO_WINDOW);
+      showToast('تم المسح — يمكنك التراجع');
+      $input.focus();
     });
-    btn.classList.add('active');
-    btn.setAttribute('aria-pressed', 'true');
-    document.querySelectorAll('#ref-table-body tr').forEach(tr => {
-      tr.classList.toggle('hidden', cat !== 'all' && tr.dataset.cat !== cat);
+
+    $btnUndo.addEventListener('click', () => {
+      if (clearedValue === null) return;
+      $input.value = clearedValue;
+      hideUndo();
+      renderHighlight($input.value);
+      doConvert();
+      $input.focus();
     });
-  });
-  $refControls.appendChild(btn);
-});
 
-/* ----- Dark Mode Toggle ----- */
-const $themeToggle = document.getElementById('theme-toggle');
-const DARK_KEY = 'excel-converter-theme';
+    /* ----- ربط الأحداث ----- */
+    $btnConvert.addEventListener('click', () => doConvert());
+    $btnCopy.addEventListener('click', copyCode);
 
-function applyTheme(dark) {
-  document.documentElement.dataset.theme = dark ? 'dark' : '';
-  $themeToggle.textContent = dark ? '☀️' : '🌙';
-}
+    $input.addEventListener('input', () => {
+      scheduleHighlight();
+      scheduleConvert();
+      hideUndo();
+    });
+    $input.addEventListener('scroll', () => {
+      $highlight.scrollTop = $input.scrollTop;
+      $highlight.scrollLeft = $input.scrollLeft;
+    });
+    $input.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        if (convertTimer) {
+          clearTimeout(convertTimer);
+          convertTimer = null;
+        }
+        doConvert();
+      }
+    });
 
-// الثيم طُبّق مبكراً في <head>؛ هنا نزامن أيقونة الزر مع الحالة الفعلية
-applyTheme(document.documentElement.dataset.theme === 'dark');
+    /* ----- الأمثلة السريعة ----- */
+    const EXAMPLES = [
+      { label: 'شرط بسيط', cat: 'logic', formula: '=IF(A1>10,"كبير","صغير")' },
+      { label: 'مجموع نطاق', cat: 'math', formula: '=SUM(A1:A10)' },
+      { label: 'متوسط', cat: 'math', formula: '=AVERAGE(B1:B5)' },
+      { label: 'دمج نصوص', cat: 'text', formula: '=CONCATENATE("الإجمالي: ",A1," ر.س")' },
+      { label: 'بحث عمودي', cat: 'lookup', formula: '=VLOOKUP(A2,B1:D10,3,FALSE)' },
+      { label: 'بحث + INDEX/MATCH', cat: 'lookup', formula: '=INDEX(C1:C10,MATCH(A2,B1:B10,0))' },
+      { label: 'عدّ بشرط', cat: 'count', formula: '=COUNTIF(A1:A20,">100")' },
+      { label: 'عدّ بشروط متعددة', cat: 'count', formula: '=COUNTIFS(A1:A10,">0",B1:B10,"معتمد")' },
+      { label: 'استخراج جزء نص', cat: 'text', formula: '=MID(A1,3,5)' },
+      { label: 'استبدال نص', cat: 'text', formula: '=SUBSTITUTE(A1,"-","/")' },
+      { label: 'الفرق بين تاريخين', cat: 'date', formula: '=DATEDIF(A1,B1,"D")' },
+      { label: 'إضافة شهور', cat: 'date', formula: '=EDATE(A1,3)' },
+      { label: 'سنة من تاريخ', cat: 'date', formula: '=YEAR(TODAY())' },
+      { label: 'تاريخ مخصص', cat: 'date', formula: '=DATE(2026,6,15)' },
+      { label: 'فحص خلية فارغة', cat: 'check', formula: '=IF(ISBLANK(A1),"فارغ","موجود")' },
+      { label: 'فحص رقم', cat: 'check', formula: '=IF(ISNUMBER(A1),A1*2,0)' },
+      { label: 'الجذر التربيعي', cat: 'math', formula: '=SQRT(POWER(A1,2)+POWER(B1,2))' },
+      { label: 'باقي القسمة', cat: 'math', formula: '=IF(MOD(A1,2)=0,"زوجي","فردي")' }
+    ];
 
-$themeToggle.addEventListener('click', () => {
-  const isDark = document.documentElement.dataset.theme === 'dark';
-  applyTheme(!isDark);
-  // localStorage قد يرمي استثناء في بعض أوضاع الخصوصية — الثيم يعمل بدون حفظ
-  try { localStorage.setItem(DARK_KEY, !isDark ? 'dark' : 'light'); } catch (e) {}
-});
+    for (const ex of EXAMPLES) {
+      // <button> لا <div>: يحلّ التنقل بلوحة المفاتيح والدلالة والتفعيل بـEnter/Space
+      const card = el('button', 'example-card');
+      card.type = 'button';
+
+      const label = el('div', 'label');
+      label.appendChild(doc.createTextNode(ex.label));
+      label.appendChild(el('span', `cat-pill ref-cat ${ex.cat}`, CAT_LABELS[ex.cat]));
+
+      card.appendChild(label);
+      card.appendChild(el('div', 'formula', ex.formula));
+      card.addEventListener('click', () => {
+        $input.value = ex.formula;
+        hideUndo();
+        doConvert();
+        $input.focus();
+        // بعض البيئات (jsdom مثلاً) لا تنفّذ scrollTo — التمرير تحسين لا شرط
+        try {
+          if (win && win.scrollTo) win.scrollTo({ top: 0, behavior: 'smooth' });
+        } catch (e) {}
+      });
+      $examples.appendChild(card);
+    }
+
+    /* ----- جدول المرجع: تصفية بالفئة + بحث نصي ----- */
+    for (const [name, info] of Object.entries(FUNCTIONS)) {
+      const tr = doc.createElement('tr');
+      tr.dataset.cat = info.cat;
+      tr.dataset.search = `${name} ${info.desc} ${info.jsEquiv}`.toLowerCase();
+
+      const tdCat = doc.createElement('td');
+      tdCat.appendChild(el('span', `ref-cat ${info.cat}`, CAT_LABELS[info.cat]));
+      const tdName = doc.createElement('td');
+      tdName.appendChild(el('span', 'fn-name', name));
+      const tdEquiv = doc.createElement('td');
+      tdEquiv.appendChild(el('span', 'js-equiv', info.jsEquiv));
+      const tdDesc = doc.createElement('td');
+      tdDesc.textContent = info.desc;
+
+      tr.appendChild(tdCat);
+      tr.appendChild(tdName);
+      tr.appendChild(tdEquiv);
+      tr.appendChild(tdDesc);
+      $refBody.appendChild(tr);
+    }
+
+    let activeCat = 'all';
+
+    function applyRefFilter() {
+      const query = ($refSearch ? $refSearch.value : '').trim().toLowerCase();
+      let visible = 0;
+      for (const tr of $refBody.querySelectorAll('tr')) {
+        const okCat = activeCat === 'all' || tr.dataset.cat === activeCat;
+        const okText = !query || tr.dataset.search.indexOf(query) !== -1;
+        const show = okCat && okText;
+        tr.classList.toggle('hidden', !show);
+        if (show) visible++;
+      }
+      const $empty = $('ref-empty');
+      if ($empty) $empty.hidden = visible > 0;
+    }
+
+    const cats = ['all', ...new Set(Object.values(FUNCTIONS).map((f) => f.cat))];
+    cats.forEach((cat, idx) => {
+      const btn = el('button', 'filter-btn' + (idx === 0 ? ' active' : ''));
+      btn.type = 'button';
+      btn.dataset.cat = cat;
+      btn.setAttribute('aria-pressed', idx === 0 ? 'true' : 'false');
+      const count =
+        cat === 'all'
+          ? Object.keys(FUNCTIONS).length
+          : Object.values(FUNCTIONS).filter((f) => f.cat === cat).length;
+      btn.textContent = cat === 'all' ? `الكل (${count})` : `${CAT_LABELS[cat]} (${count})`;
+      btn.addEventListener('click', () => {
+        for (const b of $refControls.querySelectorAll('.filter-btn')) {
+          b.classList.remove('active');
+          b.setAttribute('aria-pressed', 'false');
+        }
+        btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
+        activeCat = cat;
+        applyRefFilter();
+      });
+      $refControls.appendChild(btn);
+    });
+
+    if ($refSearch) $refSearch.addEventListener('input', applyRefFilter);
+
+    /* ----- الوضع الليلي ----- */
+    function applyTheme(dark) {
+      doc.documentElement.dataset.theme = dark ? 'dark' : '';
+      $themeToggle.textContent = dark ? '☀️' : '🌙';
+      $themeToggle.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    }
+
+    // الثيم طُبّق مبكراً في <head>؛ هنا نزامن أيقونة الزر مع الحالة الفعلية
+    applyTheme(doc.documentElement.dataset.theme === 'dark');
+
+    $themeToggle.addEventListener('click', () => {
+      const isDark = doc.documentElement.dataset.theme === 'dark';
+      applyTheme(!isDark);
+      // localStorage قد يرمي استثناء في بعض أوضاع الخصوصية — الثيم يعمل بدون حفظ
+      try {
+        win.localStorage.setItem(DARK_KEY, !isDark ? 'dark' : 'light');
+      } catch (e) {}
+    });
+
+    return {
+      doConvert,
+      renderHighlight,
+      showOutput,
+      applyRefFilter,
+      getLastCode: () => lastCode
+    };
+  }
+
+  global.tokenizeJS = tokenizeJS;
+  global.initUI = initUI;
+  if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { tokenizeJS, initUI, CAT_LABELS };
+  }
+
+  // تشغيل تلقائي في المتصفح فقط — في Node تُستورَد الوحدة بلا آثار جانبية
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => initUI(document));
+    } else {
+      initUI(document);
+    }
+  }
+})(typeof window !== 'undefined' ? window : globalThis);

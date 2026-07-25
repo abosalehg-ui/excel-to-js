@@ -10,21 +10,26 @@ require('../assets/functions.js');
 require('../assets/engine.js');
 require('./framework.js');
 require('./suite.js');
+// حزمة الواجهة تعمل في Node فقط (تحتاج DOM) — تتخطّى نفسها بلا jsdom
+require('./suite-ui.js');
 
 const fs = require('fs');
 const path = require('path');
 
 const TESTS = globalThis.TESTS;
 const counts = {};
-let pass = 0, fail = 0;
+let pass = 0,
+  fail = 0;
 
 for (const t of TESTS) {
   counts[t.category] = counts[t.category] || { pass: 0, fail: 0 };
   try {
     t.fn();
-    pass++; counts[t.category].pass++;
+    pass++;
+    counts[t.category].pass++;
   } catch (e) {
-    fail++; counts[t.category].fail++;
+    fail++;
+    counts[t.category].fail++;
     console.error(`✗ [${t.category}] ${t.name}\n  ${e.message}`);
   }
 }
@@ -46,7 +51,9 @@ if (fnBadge && Number(fnBadge[1]) !== fnActual) {
 
 const testBadge = readme.match(/Tests-(\d+)%2F(\d+)/);
 if (testBadge && Number(testBadge[2]) !== TESTS.length) {
-  console.error(`✗ شارة عدد الاختبارات في README (${testBadge[2]}) لا تطابق الحزمة (${TESTS.length})`);
+  console.error(
+    `✗ شارة عدد الاختبارات في README (${testBadge[2]}) لا تطابق الحزمة (${TESTS.length})`
+  );
   fail++;
 }
 
