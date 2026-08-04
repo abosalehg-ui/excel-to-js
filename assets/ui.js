@@ -17,6 +17,8 @@
 (function (global) {
   'use strict';
 
+  const NS = (global.ExcelToJS = global.ExcelToJS || {});
+
   const CAT_LABELS = {
     logic: 'منطقية',
     math: 'رياضية',
@@ -104,9 +106,9 @@
     if (!doc) throw new Error('initUI يحتاج مستنداً (document)');
     const win = doc.defaultView || (typeof window !== 'undefined' ? window : undefined);
 
-    const FUNCTIONS = global.FUNCTIONS;
-    const tokenize = global.tokenize;
-    const convertFormula = global.convertFormula;
+    const FUNCTIONS = NS.FUNCTIONS;
+    const tokenize = NS.tokenize;
+    const convertFormula = NS.convertFormula;
 
     const $ = (id) => doc.getElementById(id);
 
@@ -125,6 +127,7 @@
     const $refControls = $('ref-controls');
     const $refSearch = $('ref-search');
     const $themeToggle = $('theme-toggle');
+    const $rangeMode = $('range-mode');
 
     let lastCode = '';
     let clearedValue = null;
@@ -224,7 +227,7 @@
       $output.appendChild(block);
     }
 
-    function showOutputInfo(usedCells, usedHelpers) {
+    function showOutputInfo(paramNames, usedHelpers, usedRanges) {
       clear($outputInfo);
       const item = (label, value) => {
         const span = el('span', 'info-item', label);
@@ -232,8 +235,13 @@
         return span;
       };
       $outputInfo.appendChild(
-        item('📥 الباراميترات: ', usedCells.length ? usedCells.join(', ') : '(لا شيء)')
+        item('📥 الباراميترات: ', paramNames.length ? paramNames.join(', ') : '(لا شيء)')
       );
+      if (usedRanges && usedRanges.length > 0) {
+        $outputInfo.appendChild(
+          item('🧮 نطاقات: ', usedRanges.map((r) => `${r.name} = ${r.rows}×${r.cols}`).join('، '))
+        );
+      }
       if (usedHelpers && usedHelpers.length > 0) {
         $outputInfo.appendChild(item('🔧 Helpers مولّدة: ', usedHelpers.join(', ')));
       }
@@ -243,6 +251,8 @@
     /* ----- شريط الحالة ----- */
     function showStatus(type, buildBody) {
       $status.className = `status show ${type}`;
+      // الخطأ يقاطع، والنجاح ينتظر دوره — polite كانت تؤجّل إعلان الخطأ
+      $status.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
       clear($status);
       buildBody($status);
     }
@@ -262,11 +272,13 @@
       }
 
       try {
-        const { code, usedCells, usedHelpers } = convertFormula(input);
+        const { code, paramNames, usedRanges, usedHelpers } = convertFormula(input, {
+          rangeParams: !!($rangeMode && $rangeMode.checked)
+        });
         lastCode = code;
         renderHighlight(input);
         showOutput(code);
-        showOutputInfo(usedCells, usedHelpers);
+        showOutputInfo(paramNames, usedHelpers, usedRanges);
         showStatus('success', (box) => {
           box.appendChild(el('strong', '', '✓ نجح التحويل.'));
           box.appendChild(doc.createTextNode(' الدالة '));
@@ -293,7 +305,10 @@
         }
         showStatus('error', (box) => {
           box.appendChild(el('strong', '', '✗ خطأ:'));
-          box.appendChild(doc.createTextNode(' ' + e.message));
+          box.appendChild(doc.createTextNode(' '));
+          // الرسالة تدمج شظايا لاتينية داخل نص عربي؛ <bdi> يعزلها فلا
+          // تنقلب مواضع الأقواس وعلامات الاقتباس حولها
+          box.appendChild(el('bdi', '', e.message));
           if (e.unsupported) {
             box.appendChild(el('br'));
             box.appendChild(
@@ -334,14 +349,16 @@
         const ta = el('textarea');
         ta.value = lastCode;
         doc.body.appendChild(ta);
-        ta.select();
+        // finally لا بعد الـtry: لو رمت select() كانت العقدة تبقى يتيمة في الـDOM
         try {
+          ta.select();
           doc.execCommand('copy');
           showToast('تم النسخ ✓');
         } catch (e2) {
           showToast('تعذّر النسخ — انسخ يدوياً');
+        } finally {
+          doc.body.removeChild(ta);
         }
-        doc.body.removeChild(ta);
       }
     }
 
@@ -385,6 +402,13 @@
     /* ----- ربط الأحداث ----- */
     $btnConvert.addEventListener('click', () => doConvert());
     $btnCopy.addEventListener('click', copyCode);
+
+    // تبديل وضع الإخراج يعيد التحويل فوراً لو كان في المحرر صيغة صالحة
+    if ($rangeMode) {
+      $rangeMode.addEventListener('change', () => {
+        if ($input.value.trim()) doConvert({ silent: true });
+      });
+    }
 
     $input.addEventListener('input', () => {
       scheduleHighlight();
@@ -544,18 +568,24 @@
     };
   }
 
-  global.tokenizeJS = tokenizeJS;
-  global.initUI = initUI;
+  NS.tokenizeJS = tokenizeJS;
+  NS.initUI = initUI;
+  NS.CAT_LABELS = CAT_LABELS;
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { tokenizeJS, initUI, CAT_LABELS };
   }
 
-  // تشغيل تلقائي في المتصفح فقط — في Node تُستورَد الوحدة بلا آثار جانبية
+  // تشغيل تلقائي في المتصفح فقط — في Node تُستورَد الوحدة بلا آثار جانبية.
+  // الشرط على وجود المحرر: tests.html يحمّل هذا الملف لاختبار tokenizeJS
+  // وليس فيه عناصر التطبيق، فبلا الحارس يرمي initUI على عنصر مفقود.
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    const boot = () => {
+      if (document.getElementById('formula-input')) initUI(document);
+    };
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => initUI(document));
+      document.addEventListener('DOMContentLoaded', boot);
     } else {
-      initUI(document);
+      boot();
     }
   }
 })(typeof window !== 'undefined' ? window : globalThis);

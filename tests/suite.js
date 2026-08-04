@@ -2,13 +2,19 @@
    suite.js — مجموعة اختبارات V3 (baseline لكل ميزات V2)
    ------------------------------------------------------------
    تستخدم: test, assertEqual, assertClose, assertContains,
-            assertThrows, runFormula  (معرّفة في tests.html)
+            assertThrows, runFormula  (من tests/framework.js)
    تنقسم لأربع فئات:
      1. Tokenizer       — تقسيم الصيغة إلى tokens
      2. Parser          — بناء AST صحيح
      3. Generator       — توليد كود JS صحيح
      4. Runtime         — تنفيذ الكود الناتج للتأكد من النتيجة
    ============================================================ */
+
+// واجهة المحرّك صارت تحت فضاء اسم واحد (ExcelToJS) بدل خمسة globals
+// بأسماء عامة جداً؛ نفكّها هنا مرة واحدة لتبقى الاختبارات كما هي.
+const { tokenize, parse, generate, convertFormula, LIMITS } = (
+  typeof window !== 'undefined' ? window : globalThis
+).ExcelToJS;
 
 /* =========================================================
    1) Tokenizer
@@ -271,9 +277,11 @@ test('Generator', 'Comparison <> → !_eq', () => {
   assertEqual(r.expr, '(!_eq(a1, 0))');
 });
 
-test('Generator', '& → String concat', () => {
+test('Generator', '& → دمج نصي عبر _str', () => {
   const r = generate(parse(tokenize('A1&"x"')));
-  assertContains(r.expr, 'String(a1) + String("x")');
+  // _str لا String: الخلية الفارغة نص فارغ في Excel، لا "undefined"
+  assertContains(r.expr, '_str(a1) + _str("x")');
+  assertEqual(r.usedHelpers.includes('_str'), true);
 });
 
 test('Generator', '^ → Math.pow', () => {
@@ -886,4 +894,137 @@ test('once', 'فحص شامل: لا دالة تكرر وسيطاً مميزاً 
     const n = expr.split(MARK).length - 1;
     assertEqual(n, 1, `${c} كرّر وسيطه ${n} مرة`);
   }
+});
+
+/* =========================================================
+   6) الخلية الفارغة — كانت تُنتج نص "undefined" حرفياً
+   ========================================================= */
+test('Excel Semantics', 'الخلية الفارغة نص فارغ في الدمج بـ&', () => {
+  assertEqual(runFormula('=A1&" ر.س"', {}), ' ر.س');
+  assertEqual(runFormula('=A1&B1', { a1: null, b1: undefined }), '');
+});
+
+test('Excel Semantics', 'CONCATENATE يتجاهل الفراغ لا يطبع undefined', () => {
+  assertEqual(runFormula('=CONCATENATE("الإجمالي: ",A1," ر.س")', {}), 'الإجمالي:  ر.س');
+});
+
+test('Excel Semantics', 'الدوال النصية على خلية فارغة', () => {
+  assertEqual(runFormula('=LEN(A1)', {}), 0);
+  assertEqual(runFormula('=UPPER(A1)', {}), '');
+  assertEqual(runFormula('=TRIM(A1)', {}), '');
+  assertEqual(runFormula('=LEFT(A1,3)', {}), '');
+  assertEqual(runFormula('=SUBSTITUTE(A1,"-","/")', {}), '');
+});
+
+test('Excel Semantics', 'الخلية الفارغة لا تكسر النص الحقيقي', () => {
+  assertEqual(runFormula('=UPPER(A1)', { a1: 'abc' }), 'ABC');
+  assertEqual(runFormula('=LEN(A1)', { a1: 'مرحبا' }), 5);
+});
+
+test('Excel Semantics', 'LEFT/RIGHT/MID ترجع #VALUE! على وسيط غير صالح', () => {
+  assertEqual(runFormula('=LEFT(A1,-1)', { a1: 'hello' }), '#VALUE!');
+  assertEqual(runFormula('=RIGHT(A1,-1)', { a1: 'hello' }), '#VALUE!');
+  assertEqual(runFormula('=MID(A1,0,3)', { a1: 'hello' }), '#VALUE!');
+  assertEqual(runFormula('=MID(A1,2,-1)', { a1: 'hello' }), '#VALUE!');
+  // الحالات الصالحة تبقى كما هي
+  assertEqual(runFormula('=RIGHT(A1,0)', { a1: 'hello' }), '');
+  assertEqual(runFormula('=LEFT(A1,2)', { a1: 'hello' }), 'he');
+  assertEqual(runFormula('=MID(A1,2,3)', { a1: 'hello' }), 'ell');
+});
+
+test('Excel Semantics', 'ISNUMBER تستبعد اللانهاية كما في Excel', () => {
+  assertEqual(runFormula('=ISNUMBER(1/0)', {}), false);
+  assertEqual(runFormula('=ISNUMBER(A1)', { a1: 5 }), true);
+  assertEqual(runFormula('=ISNUMBER(A1)', { a1: 'x' }), false);
+});
+
+/* =========================================================
+   7) عقد الوسائط الافتراضية (defaults) وترتيب الباراميترات
+   ========================================================= */
+test('Generator', 'defaults تملأ الوسائط الاختيارية مركزياً', () => {
+  assertEqual(runFormula('=IF(A1>10,"كبير")', { a1: 5 }), false);
+  assertEqual(runFormula('=LEFT(A1)', { a1: 'hello' }), 'h');
+  assertEqual(runFormula('=RIGHT(A1)', { a1: 'hello' }), 'o');
+  assertEqual(runFormula('=MATCH(A1,B1:B3)', { a1: 2, b1: 1, b2: 2, b3: 3 }), 2);
+});
+
+test('Generator', 'VLOOKUP بلا وسيط رابع = بحث تقريبي', () => {
+  const vals = { a1: 15, b1: 1, c1: 'x', b2: 10, c2: 'y', b3: 20, c3: 'z' };
+  assertEqual(runFormula('=VLOOKUP(A1,B1:C3,2)', vals), 'y');
+  assertEqual(runFormula('=VLOOKUP(A1,B1:C3,2,TRUE)', vals), 'y');
+  assertEqual(runFormula('=VLOOKUP(A1,B1:C3,2,FALSE)', vals), '#N/A');
+});
+
+test('Generator', 'الحرفيّ في الوسيط الرابع يُطوى وقت التوليد', () => {
+  // بلا الطيّ كان الناتج يحمل `(false === false || false === 0)`
+  const code = convertFormula('=VLOOKUP(A1,B1:C2,2,FALSE)').code;
+  assertContains(code, '_vlookup(a1, [[b1, c1], [b2, c2]], 2, true)');
+});
+
+test('Generator', 'ترتيب الأعمدة برقمها لا أبجدياً', () => {
+  // أبجدياً كانت aa1 تسبق y1 — وترتيب Excel هو … y, z, aa, ab
+  assertEqual(convertFormula('=SUM(Y1:AB1)').usedCells, ['y1', 'z1', 'aa1', 'ab1']);
+  assertEqual(convertFormula('=A10+A2+A1').usedCells, ['a1', 'a2', 'a10']);
+});
+
+/* =========================================================
+   8) وضع الإخراج بالنطاقات (rangeParams)
+   ========================================================= */
+test('Generator', 'rangeParams يحوّل النطاق لباراميتر واحد', () => {
+  const r = convertFormula('=SUM(A1:A5)', { rangeParams: true });
+  assertEqual(r.paramNames, ['a1_a5']);
+  assertEqual(r.usedRanges.length, 1);
+  assertEqual(r.usedRanges[0].rows, 5);
+  assertEqual(r.usedRanges[0].cols, 1);
+  assertContains(r.code, 'function calculate(a1_a5)');
+});
+
+test('Generator', 'rangeParams يمرّر الجدول كمصفوفة ثنائية بلا تسطيح', () => {
+  const r = convertFormula('=VLOOKUP(A2,B1:D3,3,FALSE)', { rangeParams: true });
+  assertEqual(r.paramNames, ['a2', 'b1_d3']);
+  assertContains(r.code, '_vlookup(a2, b1_d3, 3, true)');
+  assertContains(r.code, 'مصفوفة ثنائية 3×3');
+});
+
+test('Generator', 'rangeParams يفرد النطاق في السياق المسطّح', () => {
+  const r = convertFormula('=SUM(A1:B2)', { rangeParams: true });
+  assertContains(r.code, 'a1_b2.flat(Infinity)');
+});
+
+test('Generator', 'rangeParams: النطاق المكرّر باراميتر واحد', () => {
+  const r = convertFormula('=SUM(A1:A3)+MAX(A1:A3)', { rangeParams: true });
+  assertEqual(r.paramNames, ['a1_a3']);
+});
+
+test('Generator', 'rangeParams يجعل النطاق الكبير قابلاً للاستدعاء', () => {
+  // الوضع الافتراضي يولّد توقيعاً بألف باراميتر
+  assertEqual(convertFormula('=SUM(A1:A1000)').paramNames.length, 1000);
+  assertEqual(convertFormula('=SUM(A1:A1000)', { rangeParams: true }).paramNames, ['a1_a1000']);
+});
+
+test('Runtime: Composite', 'rangeParams ينفّذ بنفس نتيجة الوضع الافتراضي', () => {
+  const flat = runFormula('=SUM(A1:A3)', { a1: 1, a2: 2, a3: 3 });
+  const ranged = runFormula('=SUM(A1:A3)', { a1_a3: [[1], [2], [3]] }, { rangeParams: true });
+  assertEqual(flat, 6);
+  assertEqual(ranged, 6);
+
+  const lookup = runFormula(
+    '=VLOOKUP(A2,B1:C2,2,FALSE)',
+    {
+      a2: 'k',
+      b1_c2: [
+        ['k', 'v1'],
+        ['z', 'v2']
+      ]
+    },
+    { rangeParams: true }
+  );
+  assertEqual(lookup, 'v1');
+});
+
+test('Limits', 'rangeParams يحترم حد إجمالي الخلايا', () => {
+  assertThrows(
+    () => convertFormula('=SUM(A1:A1000,B1:B1000,C1:C500)', { rangeParams: true }),
+    'أكثر من 2000 خلية'
+  );
 });

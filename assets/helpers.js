@@ -5,7 +5,24 @@
    topological عند توليد الكود النهائي.
    ============================================================ */
 (function (global) {
+  const NS = (global.ExcelToJS = global.ExcelToJS || {});
+
   const HELPERS = {
+    // _str: تحويل نصي بدلالات Excel — الخلية الفارغة نص فارغ لا "undefined".
+    // كل موضع كان يستدعي String(x) مباشرةً يمرّ من هنا الآن.
+    _str: {
+      code: `function _str(v) {
+  return v === null || v === undefined ? '' : String(v);
+}`
+    },
+
+    // _toDate: توحيد قبول التاريخ — Date كما هي، وأي شيء آخر يمرّ على new Date
+    _toDate: {
+      code: `function _toDate(v) {
+  return v instanceof Date ? v : new Date(v);
+}`
+    },
+
     // _eq: مساواة بدلالات Excel — مقارنة النصوص غير حساسة لحالة الأحرف
     _eq: {
       code: `function _eq(a, b) {
@@ -48,8 +65,9 @@
 
     // _substitute: استبدال نص — الكل أو التكرار رقم instance فقط
     _substitute: {
+      deps: ['_str'],
       code: `function _substitute(text, oldText, newText, instance) {
-  const s = String(text), o = String(oldText), n = String(newText);
+  const s = _str(text), o = _str(oldText), n = _str(newText);
   if (o === '') return s;
   if (instance === undefined) return s.split(o).join(n);
   const target = Number(instance);
@@ -209,9 +227,10 @@
 
     // _datedif: الفرق بين تاريخين
     _datedif: {
+      deps: ['_toDate'],
       code: `function _datedif(start, end, unit) {
-  const s = start instanceof Date ? start : new Date(start);
-  const e = end instanceof Date ? end : new Date(end);
+  const s = _toDate(start);
+  const e = _toDate(end);
   const u = String(unit).toUpperCase();
   // فرق الأيام التقويمية عبر UTC — القسمة على فرق التوقيت المحلي
   // تنقص يوماً عند عبور حدود التوقيت الصيفي
@@ -257,8 +276,9 @@
 
     // _edate: إضافة شهور لتاريخ
     _edate: {
+      deps: ['_toDate'],
       code: `function _edate(start, months) {
-  const d = start instanceof Date ? new Date(start.getTime()) : new Date(start);
+  const d = new Date(_toDate(start).getTime());
   const targetMonth = d.getMonth() + Number(months);
   const result = new Date(d.getFullYear(), targetMonth, d.getDate());
   if (result.getDate() !== d.getDate()) result.setDate(0);
@@ -278,6 +298,6 @@
     }
   };
 
-  global.HELPERS = HELPERS;
+  NS.HELPERS = HELPERS;
   if (typeof module !== 'undefined' && module.exports) module.exports = { HELPERS };
 })(typeof window !== 'undefined' ? window : globalThis);

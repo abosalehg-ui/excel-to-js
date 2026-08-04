@@ -2,15 +2,30 @@
    functions.js — قاموس الدوال المدعومة
    ------------------------------------------------------------
    كل دالة: { cat, desc, jsEquiv, minArgs, maxArgs, generator,
-              usesHelpers?, matrixArgs? }
+              usesHelpers?, matrixArgs?, defaults? }
      - minArgs/maxArgs: عقد عدد الوسائط — يُفحص مركزياً في
                         engine.js قبل استدعاء الـ generator
                         (maxArgs: Infinity = بلا حد أعلى)
      - usesHelpers: قائمة helpers يحتاجها هذا التوليد
      - matrixArgs:  أرقام الوسائط اللي لازم تتولّد كـ 2D matrix
                     (مثلاً VLOOKUP يبغى الجدول كـ matrix لا flat)
+     - defaults:    { رقم الوسيط: كود الافتراضي } — يملأها engine.js
+                    مركزياً قبل استدعاء الـ generator، فيستقبل الـ
+                    generator دائماً مصفوفة وسائط مكتملة بلا فحص
+                    `x !== undefined` مكرّر في كل دالة
    ============================================================ */
 (function (global) {
+  const NS = (global.ExcelToJS = global.ExcelToJS || {});
+
+  // الوسيط الرابع في VLOOKUP/HLOOKUP: TRUE/محذوف = تقريبي، FALSE/0 = تام.
+  // مشترك بين الدالتين بدل تكرار السطر حرفياً. الحرفيّ يُطوى وقت التوليد
+  // حتى لا يظهر `(false === false || false === 0)` في الكود المعروض.
+  const exactArg = (ctx, exact) => {
+    if (exact === 'true') return 'false';
+    if (exact === 'false') return 'true';
+    return ctx.once(exact, (e) => `(${e} === false || ${e} === 0)`);
+  };
+
   const FUNCTIONS = {
     // ===== المنطقية =====
     IF: {
@@ -19,9 +34,10 @@
       jsEquiv: 'cond ? a : b',
       minArgs: 2,
       maxArgs: 3,
+      defaults: { 2: 'false' },
       generator: (args) => {
         const [cond, a, b] = args;
-        return `(${cond} ? ${a} : ${b !== undefined ? b : 'false'})`;
+        return `(${cond} ? ${a} : ${b})`;
       }
     },
     AND: {
@@ -153,7 +169,8 @@
       jsEquiv: 'a + b + ...',
       minArgs: 1,
       maxArgs: Infinity,
-      generator: (args) => `[${args.join(', ')}].map(String).join('')`
+      usesHelpers: ['_str'],
+      generator: (args) => `[${args.join(', ')}].map(_str).join('')`
     },
     LEFT: {
       cat: 'text',
@@ -161,9 +178,12 @@
       jsEquiv: 'str.slice(0, n)',
       minArgs: 1,
       maxArgs: 2,
-      generator: (args) => {
+      defaults: { 1: '1' },
+      usesHelpers: ['_str'],
+      generator: (args, ctx) => {
         const [str, n] = args;
-        return `String(${str}).slice(0, ${n !== undefined ? n : '1'})`;
+        // slice(0, -1) في JS = "كل شيء إلا الأخير"، بينما LEFT(x, -1) في Excel = #VALUE!
+        return ctx.once(n, (k) => `(${k} < 0 ? '#VALUE!' : _str(${str}).slice(0, ${k}))`);
       }
     },
     RIGHT: {
@@ -172,11 +192,15 @@
       jsEquiv: 'str.slice(-n)',
       minArgs: 1,
       maxArgs: 2,
+      defaults: { 1: '1' },
+      usesHelpers: ['_str'],
       generator: (args, ctx) => {
         const [str, n] = args;
-        const len = n !== undefined ? n : '1';
-        // slice(-0) يعيد النص كاملاً، بينما RIGHT(x, 0) في Excel = ""
-        return ctx.once(len, (k) => `(${k} <= 0 ? '' : String(${str}).slice(-${k}))`);
+        // slice(-0) يعيد النص كاملاً بينما RIGHT(x, 0) = ""، والسالب في Excel = #VALUE!
+        return ctx.once(
+          n,
+          (k) => `(${k} < 0 ? '#VALUE!' : ${k} === 0 ? '' : _str(${str}).slice(-${k}))`
+        );
       }
     },
     MID: {
@@ -185,9 +209,17 @@
       jsEquiv: 'str.substring(start-1, start-1+len)',
       minArgs: 3,
       maxArgs: 3,
+      usesHelpers: ['_str'],
       generator: (args, ctx) => {
         const [str, start, len] = args;
-        return ctx.once(`(${start}) - 1`, (i) => `String(${str}).substring(${i}, ${i} + (${len}))`);
+        // Excel: MID تُرجع #VALUE! لو البداية < 1 أو الطول < 0
+        return ctx.once(start, (s) =>
+          ctx.once(
+            len,
+            (n) =>
+              `(${s} < 1 || ${n} < 0 ? '#VALUE!' : _str(${str}).substring(${s} - 1, ${s} - 1 + ${n}))`
+          )
+        );
       }
     },
     LEN: {
@@ -196,7 +228,8 @@
       jsEquiv: 'str.length',
       minArgs: 1,
       maxArgs: 1,
-      generator: (args) => `String(${args[0]}).length`
+      usesHelpers: ['_str'],
+      generator: (args) => `_str(${args[0]}).length`
     },
     TRIM: {
       cat: 'text',
@@ -204,7 +237,8 @@
       jsEquiv: 'str.trim()',
       minArgs: 1,
       maxArgs: 1,
-      generator: (args) => `String(${args[0]}).trim()`
+      usesHelpers: ['_str'],
+      generator: (args) => `_str(${args[0]}).trim()`
     },
     UPPER: {
       cat: 'text',
@@ -212,7 +246,8 @@
       jsEquiv: 'str.toUpperCase()',
       minArgs: 1,
       maxArgs: 1,
-      generator: (args) => `String(${args[0]}).toUpperCase()`
+      usesHelpers: ['_str'],
+      generator: (args) => `_str(${args[0]}).toUpperCase()`
     },
     LOWER: {
       cat: 'text',
@@ -220,7 +255,8 @@
       jsEquiv: 'str.toLowerCase()',
       minArgs: 1,
       maxArgs: 1,
-      generator: (args) => `String(${args[0]}).toLowerCase()`
+      usesHelpers: ['_str'],
+      generator: (args) => `_str(${args[0]}).toLowerCase()`
     },
     REPLACE: {
       cat: 'text',
@@ -228,12 +264,13 @@
       jsEquiv: 'str.slice + new + str.slice',
       minArgs: 4,
       maxArgs: 4,
+      usesHelpers: ['_str'],
       generator: (args, ctx) => {
         const [str, start, num, newStr] = args;
-        return ctx.once(`String(${str})`, (s) =>
+        return ctx.once(`_str(${str})`, (s) =>
           ctx.once(
             `(${start}) - 1`,
-            (i) => `(${s}.slice(0, ${i}) + String(${newStr}) + ${s}.slice(${i} + (${num})))`
+            (i) => `(${s}.slice(0, ${i}) + _str(${newStr}) + ${s}.slice(${i} + (${num})))`
           )
         );
       }
@@ -244,10 +281,11 @@
       jsEquiv: '_substitute(str, old, new, n?)',
       minArgs: 3,
       maxArgs: 4,
+      defaults: { 3: 'undefined' },
       usesHelpers: ['_substitute'],
       generator: (args) => {
         const [str, oldText, newText, instance] = args;
-        return `_substitute(${str}, ${oldText}, ${newText}, ${instance !== undefined ? instance : 'undefined'})`;
+        return `_substitute(${str}, ${oldText}, ${newText}, ${instance})`;
       }
     },
 
@@ -301,12 +339,10 @@
       maxArgs: 4,
       usesHelpers: ['_vlookup'],
       matrixArgs: [1],
+      defaults: { 3: 'true' },
       generator: (args, ctx) => {
         const [val, table, col, exact] = args;
-        // الوسيط الرابع في Excel: TRUE/محذوف = تقريبي، FALSE/0 = تام
-        const exactExpr =
-          exact !== undefined ? ctx.once(exact, (e) => `(${e} === false || ${e} === 0)`) : 'false';
-        return `_vlookup(${val}, ${table}, ${col}, ${exactExpr})`;
+        return `_vlookup(${val}, ${table}, ${col}, ${exactArg(ctx, exact)})`;
       }
     },
     HLOOKUP: {
@@ -317,11 +353,10 @@
       maxArgs: 4,
       usesHelpers: ['_hlookup'],
       matrixArgs: [1],
+      defaults: { 3: 'true' },
       generator: (args, ctx) => {
         const [val, table, row, exact] = args;
-        const exactExpr =
-          exact !== undefined ? ctx.once(exact, (e) => `(${e} === false || ${e} === 0)`) : 'false';
-        return `_hlookup(${val}, ${table}, ${row}, ${exactExpr})`;
+        return `_hlookup(${val}, ${table}, ${row}, ${exactArg(ctx, exact)})`;
       }
     },
     INDEX: {
@@ -332,9 +367,10 @@
       maxArgs: 3,
       usesHelpers: ['_index'],
       matrixArgs: [0],
+      defaults: { 2: 'undefined' },
       generator: (args) => {
         const [arr, row, col] = args;
-        return `_index(${arr}, ${row}, ${col !== undefined ? col : 'undefined'})`;
+        return `_index(${arr}, ${row}, ${col})`;
       }
     },
     MATCH: {
@@ -344,9 +380,10 @@
       minArgs: 2,
       maxArgs: 3,
       usesHelpers: ['_match'],
+      defaults: { 2: '1' },
       generator: (args) => {
         const [val, arr, type] = args;
-        return `_match(${val}, ${arr}, ${type !== undefined ? type : '1'})`;
+        return `_match(${val}, ${arr}, ${type})`;
       }
     },
 
@@ -373,8 +410,8 @@
       jsEquiv: 'date.getFullYear()',
       minArgs: 1,
       maxArgs: 1,
-      generator: (args, ctx) =>
-        ctx.once(args[0], (d) => `(${d} instanceof Date ? ${d} : new Date(${d})).getFullYear()`)
+      usesHelpers: ['_toDate'],
+      generator: (args) => `_toDate(${args[0]}).getFullYear()`
     },
     MONTH: {
       cat: 'date',
@@ -382,8 +419,8 @@
       jsEquiv: 'date.getMonth() + 1',
       minArgs: 1,
       maxArgs: 1,
-      generator: (args, ctx) =>
-        ctx.once(args[0], (d) => `((${d} instanceof Date ? ${d} : new Date(${d})).getMonth() + 1)`)
+      usesHelpers: ['_toDate'],
+      generator: (args) => `(_toDate(${args[0]}).getMonth() + 1)`
     },
     DAY: {
       cat: 'date',
@@ -391,8 +428,8 @@
       jsEquiv: 'date.getDate()',
       minArgs: 1,
       maxArgs: 1,
-      generator: (args, ctx) =>
-        ctx.once(args[0], (d) => `(${d} instanceof Date ? ${d} : new Date(${d})).getDate()`)
+      usesHelpers: ['_toDate'],
+      generator: (args) => `_toDate(${args[0]}).getDate()`
     },
     DATE: {
       cat: 'date',
@@ -440,8 +477,9 @@
       jsEquiv: 'typeof v === "number"',
       minArgs: 1,
       maxArgs: 1,
+      // isFinite تغطي NaN وتستبعد ±Infinity — ISNUMBER(1/0) في Excel = FALSE
       generator: (args, ctx) =>
-        ctx.once(args[0], (v) => `(typeof ${v} === 'number' && !isNaN(${v}))`)
+        ctx.once(args[0], (v) => `(typeof ${v} === 'number' && isFinite(${v}))`)
     },
     ISTEXT: {
       cat: 'check',
@@ -462,6 +500,6 @@
     }
   };
 
-  global.FUNCTIONS = FUNCTIONS;
+  NS.FUNCTIONS = FUNCTIONS;
   if (typeof module !== 'undefined' && module.exports) module.exports = { FUNCTIONS };
 })(typeof window !== 'undefined' ? window : globalThis);
