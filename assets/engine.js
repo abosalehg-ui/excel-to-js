@@ -5,8 +5,9 @@
    (لازم تتحمّل قبل هذا الملف).
    ============================================================ */
 (function (global) {
-  const HELPERS = global.HELPERS;
-  const FUNCTIONS = global.FUNCTIONS;
+  const NS = (global.ExcelToJS = global.ExcelToJS || {});
+  const HELPERS = NS.HELPERS;
+  const FUNCTIONS = NS.FUNCTIONS;
   if (!HELPERS || !FUNCTIONS) {
     throw new Error('engine.js يتطلب تحميل helpers.js و functions.js قبله');
   }
@@ -303,19 +304,52 @@
   // تعبير "بسيط" = تقييمه بلا تكلفة ولا أثر جانبي، فلا حاجة للفّه
   const SIMPLE_EXPR = /^(?:[A-Za-z_$][\w$]*|-?\d+(?:\.\d+)?|true|false|"(?:[^"\\]|\\.)*")$/;
 
-  function generate(ast) {
+  // تحويل حرف العمود إلى رقمه (A=1, Z=26, AA=27) — على مستوى الوحدة
+  // لأن naturalSort خارج generate يحتاجه أيضاً
+  const colToNum = (c) => {
+    let n = 0;
+    for (const ch of c.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
+    return n;
+  };
+  const numToCol = (n) => {
+    let s = '';
+    while (n > 0) {
+      const r = (n - 1) % 26;
+      s = String.fromCharCode(65 + r) + s;
+      n = Math.floor((n - 1) / 26);
+    }
+    return s;
+  };
+
+  /* ------------------------------------------------------------
+   generate(ast, options)
+     options.rangeParams — وضع الإخراج بالنطاقات:
+       false (افتراضي): كل خلية باراميتر مستقل — calculate(a1, a2, …)
+       true:            كل نطاق باراميتر واحد يستقبل مصفوفة ثنائية —
+                        calculate(a2, b1_d10). يلزم حين يكون النطاق
+                        كبيراً: توقيع بألف باراميتر غير قابل للاستدعاء.
+   ------------------------------------------------------------ */
+  function generate(ast, options) {
+    const rangeParams = !!(options && options.rangeParams);
     const usedCells = new Set();
     const usedHelpers = new Set();
+    // اسم النطاق المطبَّع → { name, rows, cols }
+    const usedRanges = new Map();
+    let rangeCellCount = 0;
     let tmpId = 0;
 
-    const cellVar = (name) => {
-      const v = name.toLowerCase();
-      usedCells.add(v);
-      if (usedCells.size > LIMITS.totalCells) {
+    const checkTotal = (n) => {
+      if (n > LIMITS.totalCells) {
         throw new Error(
           `الصيغة تشير إلى أكثر من ${LIMITS.totalCells} خلية. قلّل عدد النطاقات أو حجمها.`
         );
       }
+    };
+
+    const cellVar = (name) => {
+      const v = name.toLowerCase();
+      usedCells.add(v);
+      checkTotal(usedCells.size + rangeCellCount);
       return v;
     };
 
@@ -333,22 +367,7 @@
       }
     };
 
-    const colToNum = (c) => {
-      let n = 0;
-      for (const ch of c.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
-      return n;
-    };
-    const numToCol = (n) => {
-      let s = '';
-      while (n > 0) {
-        const r = (n - 1) % 26;
-        s = String.fromCharCode(65 + r) + s;
-        n = Math.floor((n - 1) / 26);
-      }
-      return s;
-    };
-
-    function expandRangeToMatrix(start, end) {
+    function rangeBounds(start, end) {
       const m1 = start.match(/^([A-Za-z]+)(\d+)$/);
       const m2 = end.match(/^([A-Za-z]+)(\d+)$/);
       if (!m1 || !m2) throw new Error(`نطاق غير صالح: ${start}:${end}`);
@@ -369,7 +388,12 @@
           `النطاق كبير جداً (${rows * cols} خلية). الحد الأقصى ${LIMITS.rangeCells}.`
         );
       }
+      return { cMin, cMax, rMin, rMax, rows, cols };
+    }
 
+    // وضع الخلايا المفردة: النطاق يتمدّد لمصفوفة من أسماء المتغيّرات
+    function expandRangeToMatrix(start, end) {
+      const { cMin, cMax, rMin, rMax, rows, cols } = rangeBounds(start, end);
       const matrix = [];
       for (let r = rMin; r <= rMax; r++) {
         const row = [];
@@ -379,6 +403,20 @@
         matrix.push(row);
       }
       return { matrix, rows, cols };
+    }
+
+    // وضع النطاقات: النطاق يصير باراميتراً واحداً اسمه a1_b10
+    function rangeParamName(start, end) {
+      const { rows, cols } = rangeBounds(start, end);
+      const key = `${start}:${end}`.toLowerCase();
+      let entry = usedRanges.get(key);
+      if (!entry) {
+        entry = { name: key.replace(':', '_'), rows, cols };
+        usedRanges.set(key, entry);
+        rangeCellCount += rows * cols;
+        checkTotal(usedCells.size + rangeCellCount);
+      }
+      return entry.name;
     }
 
     const opMap = {
@@ -415,6 +453,11 @@
           return cellVar(node.name);
 
         case 'Range': {
+          if (rangeParams) {
+            // الباراميتر يصل دائماً كمصفوفة ثنائية؛ السياق المسطّح يفرده
+            const name = rangeParamName(node.start, node.end);
+            return needsMatrix ? name : `${name}.flat(Infinity)`;
+          }
           const { matrix } = expandRangeToMatrix(node.start, node.end);
           if (needsMatrix) {
             const rowStrs = matrix.map((row) => `[${row.join(', ')}]`);
@@ -432,7 +475,11 @@
         case 'Binary': {
           const L = gen(node.left);
           const R = gen(node.right);
-          if (node.op === '&') return `(String(${L}) + String(${R}))`;
+          // الخلية الفارغة نص فارغ في Excel — String(undefined) كان يعطي "undefined"
+          if (node.op === '&') {
+            registerHelper('_str');
+            return `(_str(${L}) + _str(${R}))`;
+          }
           if (node.op === '^') return `Math.pow(${L}, ${R})`;
           // = و <> بدلالات Excel: مقارنة النصوص غير حساسة لحالة الأحرف
           if (node.op === '=') {
@@ -478,6 +525,15 @@
             gen(a, { needsMatrix: matrixArgs.includes(idx) })
           );
 
+          // ملء الوسائط الاختيارية المحذوفة من عقد الدالة، فيستقبل الـ
+          // generator مصفوفة مكتملة بلا فحص `x !== undefined` في كل دالة
+          if (fn.defaults) {
+            for (const key of Object.keys(fn.defaults)) {
+              const idx = Number(key);
+              if (idx >= argc) compiledArgs[idx] = fn.defaults[key];
+            }
+          }
+
           try {
             return fn.generator(compiledArgs, ctx);
           } catch (e) {
@@ -510,17 +566,20 @@
     return {
       expr,
       usedCells: [...usedCells].sort(naturalSort),
+      usedRanges: [...usedRanges.values()].sort((x, y) => naturalSort(x.name, y.name)),
       usedHelpers: helperOrder
     };
   }
 
-  // ترتيب طبيعي للخلايا: a1, a2, ..., a10 (ليس a1, a10, a2)
+  // ترتيب طبيعي للخلايا: a1, a2, ..., a10 (ليس a1, a10, a2).
+  // الأعمدة تُقارَن برقمها لا أبجدياً — وإلا جاءت aa1 قبل y1 (ترتيب
+  // Excel هو … y, z, aa, ab).
   function naturalSort(a, b) {
-    const re = /([a-z]+)(\d+)/i;
+    const re = /^([a-z]+)(\d+)/i;
     const ma = a.match(re),
       mb = b.match(re);
     if (ma && mb) {
-      if (ma[1] !== mb[1]) return ma[1].localeCompare(mb[1]);
+      if (ma[1].toLowerCase() !== mb[1].toLowerCase()) return colToNum(ma[1]) - colToNum(mb[1]);
       return parseInt(ma[2]) - parseInt(mb[2]);
     }
     return a.localeCompare(b);
@@ -529,7 +588,7 @@
   /* ============================================================
    convertFormula — الواجهة الرئيسية
    ============================================================ */
-  function convertFormula(input) {
+  function convertFormula(input, options) {
     if (!input || !input.trim()) {
       throw Object.assign(new Error('الصيغة فارغة'), { start: 0, end: 0 });
     }
@@ -544,7 +603,8 @@
       throw Object.assign(new Error('لا توجد رموز قابلة للتحليل'), { start: 0, end: input.length });
     }
     const ast = parse(tokens);
-    const { expr, usedCells, usedHelpers } = generate(ast);
+    const { expr, usedCells, usedRanges, usedHelpers } = generate(ast, options);
+    const paramNames = [...usedCells, ...usedRanges.map((r) => r.name)];
 
     // حارس أخير: لا نُسلّم للواجهة تعبيراً ضخماً يجمّد التبويب عند العرض
     if (expr.length > LIMITS.exprLength) {
@@ -557,7 +617,7 @@
     // شبكة أمان: نتأكد أن التعبير المولّد صالح نحوياً قبل عرضه للمستخدم
     // (new Function تُصرّف فقط ولا تنفّذ — الـ helpers غير المعرفة لا تضر)
     try {
-      new Function(usedCells.join(', '), `return ${expr};`);
+      new Function(paramNames.join(', '), `return ${expr};`);
     } catch (e) {
       throw Object.assign(
         new Error(
@@ -576,21 +636,23 @@
       }
       lines.push(`// ===== الدالة الرئيسية =====`);
     }
-    const params = usedCells.length ? usedCells.join(', ') : '';
     lines.push(`// دالة محوّلة من صيغة Excel`);
-    lines.push(`// المُدخلات المطلوبة: ${usedCells.length ? usedCells.join(', ') : '(لا شيء)'}`);
-    lines.push(`function calculate(${params}) {`);
+    lines.push(`// المُدخلات المطلوبة: ${paramNames.length ? paramNames.join(', ') : '(لا شيء)'}`);
+    for (const r of usedRanges) {
+      lines.push(`//   ${r.name}: مصفوفة ثنائية ${r.rows}×${r.cols} (صفوف × أعمدة)`);
+    }
+    lines.push(`function calculate(${paramNames.join(', ')}) {`);
     lines.push(`  return ${expr};`);
     lines.push(`}`);
 
-    return { code: lines.join('\n'), usedCells, usedHelpers };
+    return { code: lines.join('\n'), usedCells, usedRanges, usedHelpers, paramNames };
   }
 
-  global.LIMITS = LIMITS;
-  global.tokenize = tokenize;
-  global.parse = parse;
-  global.generate = generate;
-  global.convertFormula = convertFormula;
+  NS.LIMITS = LIMITS;
+  NS.tokenize = tokenize;
+  NS.parse = parse;
+  NS.generate = generate;
+  NS.convertFormula = convertFormula;
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { LIMITS, tokenize, parse, generate, convertFormula };
   }

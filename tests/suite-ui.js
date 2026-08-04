@@ -1,26 +1,50 @@
 /* ============================================================
    suite-ui.js — اختبارات طبقة الواجهة
    ------------------------------------------------------------
-   تُشغَّل في Node فقط (تحتاج jsdom لبناء DOM من index.html).
-   إذا لم تكن jsdom مثبّتة تُسجَّل الاختبارات كمتخطّاة بدل الفشل،
-   فيبقى `node tests/run-node.js` صالحاً بلا npm install.
+   الملف يعمل في البيئتين:
+     - Node: كل الاختبارات (يحتاج jsdom لحزمة الـDOM).
+     - المتصفح: اختبارات tokenizeJS فقط؛ الباقي يحتاج قراءة
+       index.html من القرص فيُسجَّل **متخطّياً** لا ناجحاً.
+
+   التخطّي يمرّ عبر skip() من framework.js فيُعدّ في خانته الخاصة.
+   قبل ذلك كان `return` صامتاً يجعل 17 اختباراً يُبلَّغ عنها ناجحة
+   حتى بلا jsdom إطلاقاً — نجاح كاذب يخفي انهيار الواجهة بالكامل.
 
    سبب وجود هذا الملف: ثلاثة أعطال بصرية وصلت للإنتاج لأن
    assets/ui.js لم يكن مغطّى بأي اختبار.
    ============================================================ */
-const fs = require('fs');
-const path = require('path');
+const IS_NODE = typeof require !== 'undefined' && typeof module !== 'undefined';
 
 let JSDOM = null;
-try {
-  ({ JSDOM } = require('jsdom'));
-} catch (e) {
-  JSDOM = null;
+let INDEX_HTML = null;
+let crypto = null;
+
+if (IS_NODE) {
+  const fs = require('fs');
+  const path = require('path');
+  crypto = require('crypto');
+  try {
+    ({ JSDOM } = require('jsdom'));
+  } catch (e) {
+    JSDOM = null;
+  }
+  INDEX_HTML = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  require('../assets/ui.js');
 }
 
-const ROOT = path.join(__dirname, '..');
-const INDEX_HTML = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-const { tokenizeJS, initUI } = require('../assets/ui.js');
+const NS = (typeof window !== 'undefined' ? window : globalThis).ExcelToJS;
+// ملاحظة: لا نُصرّح بـconvertFormula هنا كـconst. في المتصفح تُحمَّل
+// حزم الاختبار كسكربتات كلاسيكية تتشارك نطاقاً معجمياً واحداً، وsuite.js
+// يُصرّح بالاسم نفسه — فيرمي "Identifier has already been declared"
+// ويسقط هذا الملف كاملاً بصمت. نناديها من NS مباشرةً.
+const { tokenizeJS, initUI, CAT_LABELS, FUNCTIONS } = NS;
+
+const escapeRe = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// حارس: الاختبارات التي تقرأ index.html لا تعمل في المتصفح
+function needsHtml() {
+  if (!INDEX_HTML) skip('يحتاج قراءة index.html من القرص — شغّله في Node');
+}
 
 /* ------------------------------------------------------------
    اختبارات نقية — لا تحتاج DOM إطلاقاً
@@ -72,6 +96,7 @@ test('UI: tokenizeJS', 'يميّز الكلمات المفتاحية والمد�
    يمنع عودة العطل الذي جعل طبقتَي المحرر لا تتحاذيان.
    ------------------------------------------------------------ */
 test('UI: CSS guard', 'نص الـtextarea شفاف ليظهر التظليل من تحته', () => {
+  needsHtml();
   // بداية السطر تميّز القاعدة المستقلة عن المشتركة (.editor-highlight, .editor-input)
   const rule = INDEX_HTML.match(/\n\s*\.editor-input\s*\{[^}]*\}/);
   assertEqual(rule !== null, true, 'قاعدة .editor-input غير موجودة');
@@ -80,6 +105,7 @@ test('UI: CSS guard', 'نص الـtextarea شفاف ليظهر التظليل م
 });
 
 test('UI: CSS guard', 'الطبقتان تصرّحان بنفس المحاذاة صراحةً', () => {
+  needsHtml();
   // <textarea> لا يرث text-align (الـUA stylesheet يفرض start)
   const shared = INDEX_HTML.match(/\.editor-highlight,\s*\.editor-input\s*\{[^}]*\}/);
   assertEqual(shared !== null, true, 'القاعدة المشتركة غير موجودة');
@@ -87,18 +113,21 @@ test('UI: CSS guard', 'الطبقتان تصرّحان بنفس المحاذاة
 });
 
 test('UI: CSS guard', 'ألوان التظليل لها نسخة ليلية', () => {
+  needsHtml();
   for (const cls of ['tk-fn', 'tk-num', 'tk-str', 'tk-cell', 'tk-op', 'tk-paren']) {
     assertContains(INDEX_HTML, `[data-theme="dark"] .${cls}`);
   }
 });
 
 test('UI: CSS guard', '[hidden] محصّنة ضد قواعد display الأخرى', () => {
+  needsHtml();
   // .btn { display: inline-flex } يتغلّب على [hidden] من الـUA stylesheet،
   // فيظهر زر التراجع رغم hidden. jsdom يفحص الخاصية لا التصيير، لذا الحارس هنا.
   assertContains(INDEX_HTML, '[hidden] { display: none !important; }');
 });
 
 test('UI: CSS guard', 'الـtoast يستعمل متغيّراً مخصصاً لا var(--text)', () => {
+  needsHtml();
   const rule = INDEX_HTML.match(/\.toast\s*\{[^}]*\}/);
   assertContains(rule[0], 'var(--toast-bg)');
   assertContains(rule[0], 'var(--toast-text)');
@@ -119,10 +148,8 @@ function makeApp() {
 
 function uiTest(name, fn) {
   test('UI: DOM', name, () => {
-    if (!JSDOM) {
-      // بلا jsdom نتخطّى بصمت بدل الفشل الكاذب
-      return;
-    }
+    needsHtml();
+    if (!JSDOM) skip('jsdom غير مثبّتة — شغّل npm install');
     const app = makeApp();
     try {
       fn(app);
@@ -145,14 +172,14 @@ uiTest('الكود المعروض يطابق الكود المولّد نصاً'
   doc.getElementById('formula-input').value = '=IF(A1>0,"نعم","لا")';
   api.doConvert();
   const shown = doc.querySelector('.code-content').textContent;
-  const expected = convertFormula('=IF(A1>0,"نعم","لا")').code;
+  const expected = NS.convertFormula('=IF(A1>0,"نعم","لا")').code;
   assertEqual(shown, expected);
 });
 
 uiTest('أرقام الأسطر تطابق عدد أسطر الكود', ({ doc, api }) => {
   doc.getElementById('formula-input').value = '=COUNTIF(A1:A3,">5")';
   api.doConvert();
-  const code = convertFormula('=COUNTIF(A1:A3,">5")').code;
+  const code = NS.convertFormula('=COUNTIF(A1:A3,">5")').code;
   const shown = doc.querySelectorAll('.line-numbers div').length;
   assertEqual(shown, code.split('\n').length);
 });
@@ -291,4 +318,81 @@ uiTest('تبديل الثيم يضبط data-theme و aria-pressed', ({ doc }) =>
   toggle.click();
   assertEqual(doc.documentElement.dataset.theme, '');
   assertEqual(toggle.getAttribute('aria-pressed'), 'false');
+});
+
+uiTest('رسالة الخطأ معزولة بـbdi ومُعلَنة assertive', ({ doc, api }) => {
+  const $status = doc.getElementById('status');
+  doc.getElementById('formula-input').value = '=SUM(';
+  api.doConvert();
+  // الرسالة تدمج شظايا لاتينية في نص عربي — بلا bdi تنقلب مواضع الأقواس
+  assertEqual($status.querySelectorAll('bdi').length, 1, 'رسالة الخطأ يجب أن تكون داخل <bdi>');
+  assertEqual($status.getAttribute('aria-live'), 'assertive');
+
+  doc.getElementById('formula-input').value = '=SUM(A1:A3)';
+  api.doConvert();
+  assertEqual($status.getAttribute('aria-live'), 'polite', 'النجاح يبقى polite');
+});
+
+uiTest('مفتاح وضع النطاقات يغيّر توقيع الدالة', ({ doc, api }) => {
+  doc.getElementById('formula-input').value = '=SUM(A1:A5)';
+  api.doConvert();
+  assertContains(doc.querySelector('.code-content').textContent, 'calculate(a1, a2, a3, a4, a5)');
+
+  doc.getElementById('range-mode').checked = true;
+  api.doConvert();
+  assertContains(doc.querySelector('.code-content').textContent, 'calculate(a1_a5)');
+});
+
+/* ------------------------------------------------------------
+   حرّاس اتساق بين الكود والـCSS — كلها كانت تنكسر بصمت
+   ------------------------------------------------------------ */
+test('UI: CSS guard', 'كل فئة في FUNCTIONS لها تسمية عربية ولون', () => {
+  needsHtml();
+  // إضافة فئة جديدة كانت تُنتج زر "undefined (n)" وشارة بلا لون، بلا أي خطأ
+  for (const cat of new Set(Object.values(FUNCTIONS).map((f) => f.cat))) {
+    assertEqual(typeof CAT_LABELS[cat], 'string', `فئة بلا تسمية عربية: ${cat}`);
+    assertContains(INDEX_HTML, `.ref-cat.${cat}`, `فئة بلا لون في CSS: ${cat}`);
+    assertContains(INDEX_HTML, `--cat-${cat}-bg`, `فئة بلا متغيّر لون: ${cat}`);
+  }
+});
+
+test('UI: CSP guard', 'hash السكربت المضمّن يطابق محتواه فعلياً', () => {
+  needsHtml();
+  if (!crypto) skip('يحتاج وحدة crypto');
+  // script-src بلا 'unsafe-inline' الآن: أي تعديل على السكربت المضمّن
+  // يبطل الـhash ويمنع المتصفح من تنفيذه (فيعود وميض الوضع الفاتح)
+  const body = INDEX_HTML.match(/<script>([\s\S]*?)<\/script>/)[1];
+  const digest = 'sha256-' + crypto.createHash('sha256').update(body, 'utf8').digest('base64');
+  // نقرأ من وسم الـmeta وحده — التعليق المجاور يذكر 'unsafe-inline' نصاً
+  const csp = INDEX_HTML.match(/http-equiv="Content-Security-Policy"[\s\S]*?content="([^"]+)"/)[1];
+  const declared = csp.match(/script-src[^;]*'(sha256-[^']+)'/)[1];
+  assertEqual(digest, declared, 'أعد حساب الـhash بعد تعديل السكربت المضمّن');
+  assertEqual(/script-src[^;]*'unsafe-inline'/.test(csp), false, 'script-src بلا unsafe-inline');
+});
+
+test('UI: CSS guard', 'ورقة طباعة تلغي قصّ كتلة الكود', () => {
+  needsHtml();
+  const block = INDEX_HTML.match(/@media print \{[\s\S]*?\n  \}/);
+  assertEqual(block !== null, true, 'لا توجد قواعد @media print');
+  assertContains(block[0], 'max-height: none');
+  assertContains(block[0], '.convert-bar');
+});
+
+test('UI: CSS guard', 'الخلفيات المصمتة تستعمل --primary-solid لا --primary', () => {
+  needsHtml();
+  // القيمة الواحدة كانت ترسب في الدورين: 4.08:1 كمقدمة و4.12:1 كخلفية
+  for (const sel of ['.btn-primary', '.filter-btn.active']) {
+    const rule = INDEX_HTML.match(new RegExp(escapeRe(sel) + '\\s*\\{[^}]*\\}'));
+    assertEqual(rule !== null, true, `قاعدة ${sel} غير موجودة`);
+    assertContains(rule[0], 'var(--primary-solid)', sel);
+  }
+});
+
+test('UI: CSS guard', 'المحاذاة المنطقية بدل الفيزيائية خارج جزر الـLTR', () => {
+  needsHtml();
+  for (const sel of ['.example-card', '.ref-table th']) {
+    const rule = INDEX_HTML.match(new RegExp(escapeRe(sel) + '\\s*\\{[^}]*\\}'));
+    assertEqual(rule !== null, true, `قاعدة ${sel} غير موجودة`);
+    assertContains(rule[0], 'text-align: start', sel);
+  }
 });

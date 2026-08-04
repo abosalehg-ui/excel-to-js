@@ -14,6 +14,14 @@
     TESTS.push({ category, name, fn });
   }
 
+  // تخطٍّ صريح: يُميَّز عن النجاح في المشغّلَين (المتصفح وNode).
+  // بدونه كان اختبار متخطّى يُحسب ناجحاً — نجاح كاذب يخفي انهيار الواجهة.
+  function skip(reason) {
+    const e = new Error('تخطٍّ: ' + reason);
+    e.skipped = true;
+    throw e;
+  }
+
   function assertEqual(actual, expected, label) {
     const a = JSON.stringify(actual);
     const e = JSON.stringify(expected);
@@ -59,18 +67,20 @@
     if (!threw) throw new Error((label ? label + '\n  ' : '') + 'expected to throw, but did not');
   }
 
-  // ينفّذ صيغة على قيم خلايا ويرجّع النتيجة (اختبار end-to-end حقيقي)
-  function runFormula(formula, cellValues) {
+  // ينفّذ صيغة على قيم خلايا ويرجّع النتيجة (اختبار end-to-end حقيقي).
+  // options تُمرَّر كما هي لـconvertFormula (مثلاً { rangeParams: true }).
+  function runFormula(formula, cellValues, options) {
     cellValues = cellValues || {};
-    const { code, usedCells } = global.convertFormula(formula);
-    const body = code + `\nreturn calculate(${usedCells.join(', ')});`;
-    const fn = new Function(...usedCells, body);
-    const args = usedCells.map((c) => cellValues[c]);
+    const { code, paramNames } = global.ExcelToJS.convertFormula(formula, options);
+    const body = code + `\nreturn calculate(${paramNames.join(', ')});`;
+    const fn = new Function(...paramNames, body);
+    const args = paramNames.map((c) => cellValues[c]);
     return fn(...args);
   }
 
   global.TESTS = TESTS;
   global.test = test;
+  global.skip = skip;
   global.assertEqual = assertEqual;
   global.assertClose = assertClose;
   global.assertContains = assertContains;
@@ -80,6 +90,7 @@
     module.exports = {
       TESTS,
       test,
+      skip,
       assertEqual,
       assertClose,
       assertContains,

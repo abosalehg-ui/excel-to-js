@@ -1,0 +1,17 @@
+version: 2
+
+# التبعيات هنا أدوات تطوير فقط (jsdom, prettier) وإجراءات CI مثبّتة على SHA.
+# التثبيت على SHA يمنع الانجراف الصامت، لكنه يعني أن التحديث لن يصل إلا
+# بفتح PR — وهذه مهمة dependabot.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5

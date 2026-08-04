@@ -19,15 +19,22 @@ const path = require('path');
 const TESTS = globalThis.TESTS;
 const counts = {};
 let pass = 0,
-  fail = 0;
+  fail = 0,
+  skipped = 0;
 
 for (const t of TESTS) {
-  counts[t.category] = counts[t.category] || { pass: 0, fail: 0 };
+  counts[t.category] = counts[t.category] || { pass: 0, fail: 0, skip: 0 };
   try {
     t.fn();
     pass++;
     counts[t.category].pass++;
   } catch (e) {
+    // التخطّي ليس نجاحاً — يُعدّ في خانته الخاصة ويظهر في الملخّص
+    if (e.skipped) {
+      skipped++;
+      counts[t.category].skip++;
+      continue;
+    }
     fail++;
     counts[t.category].fail++;
     console.error(`✗ [${t.category}] ${t.name}\n  ${e.message}`);
@@ -35,15 +42,44 @@ for (const t of TESTS) {
 }
 
 for (const [cat, c] of Object.entries(counts)) {
-  console.log(`${c.fail === 0 ? '✓' : '✗'} ${cat}: ${c.pass}/${c.pass + c.fail}`);
+  const mark = c.fail > 0 ? '✗' : c.skip > 0 ? '–' : '✓';
+  const total = c.pass + c.fail + c.skip;
+  console.log(`${mark} ${cat}: ${c.pass}/${total}${c.skip ? ` (${c.skip} متخطّى)` : ''}`);
 }
-console.log(`\n${pass}/${pass + fail} passed (TZ=${process.env.TZ || 'system'})`);
+console.log(
+  `\n${pass}/${pass + fail} passed` +
+    (skipped ? `, ${skipped} skipped` : '') +
+    ` (TZ=${process.env.TZ || 'system'})`
+);
+if (skipped) {
+  console.log('ملاحظة: اختبارات متخطّاة — شغّل npm install لتفعيل حزمة الواجهة (jsdom).');
+}
 
 // فحوصات اتساق: شارات README تطابق الواقع
 const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+const pkg = require('../package.json');
+
+// الإصدار كان ينجرف في ثلاثة اتجاهات (README 3.0 / package 3.1.2 / lock 3.2.0)
+const verBadge = readme.match(/Version-([\d.]+)-/);
+if (verBadge && verBadge[1] !== pkg.version) {
+  console.error(`✗ شارة الإصدار في README (${verBadge[1]}) لا تطابق package.json (${pkg.version})`);
+  fail++;
+}
+
+const lock = require('../package-lock.json');
+if (lock.version !== pkg.version) {
+  console.error(`✗ إصدار package-lock (${lock.version}) لا يطابق package.json (${pkg.version})`);
+  fail++;
+}
+
+const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+if (indexHtml.indexOf(`النسخة ${pkg.version}`) === -1) {
+  console.error(`✗ إصدار index.html لا يطابق package.json (${pkg.version})`);
+  fail++;
+}
 
 const fnBadge = readme.match(/Functions-(\d+)-/);
-const fnActual = Object.keys(globalThis.FUNCTIONS).length;
+const fnActual = Object.keys(globalThis.ExcelToJS.FUNCTIONS).length;
 if (fnBadge && Number(fnBadge[1]) !== fnActual) {
   console.error(`✗ شارة عدد الدوال في README (${fnBadge[1]}) لا تطابق الكود (${fnActual})`);
   fail++;

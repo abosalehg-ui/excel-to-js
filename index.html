@@ -5,9 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!-- GitHub Pages لا يسمح بترويسات مخصصة، لكن وسم meta متاح.
      ‏'unsafe-eval' مطلوب لشبكة الأمان النحوية (new Function) في engine.js —
-     وهي تُصرِّف الكود المولّد ولا تنفّذه. ما عدا ذلك: لا شيء من الخارج. -->
+     وهي تُصرِّف الكود المولّد ولا تنفّذه.
+     ‏script-src بلا 'unsafe-inline': السكربت المضمّن الوحيد (تطبيق الثيم)
+     مسموح بـhash محسوب من محتواه. أي تعديل عليه يكسر الـhash، ولذلك
+     يوجد اختبار يعيد حسابه ويقارنه (UI: CSP guard).
+     ‏style-src يبقى 'unsafe-inline' لأن في الصفحة سمات style مضمّنة. -->
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+      content="default-src 'none'; script-src 'self' 'sha256-DwGWZ7qCH7510jRxEOPtEks2MQyJhB/3XCxIOi8Uhtg=' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>محوّل صيغ Excel إلى JavaScript - V3</title>
 <script>
@@ -30,14 +34,19 @@ try {
     --text-soft: #5a6677;
     /* ‏#8a94a3 كان 2.83:1 على الخلفية — تحت عتبة WCAG AA (4.5) */
     --text-mute: #68717f;
+    /* ‏--primary مقدمة (نص/حدود)، --primary-solid خلفية مصمتة بنص أبيض.
+       فصلهما ضروري: في الوضع الليلي لا توجد قيمة واحدة تنجح في الدورين. */
     --primary: #2c5282;
     --primary-hover: #1e3a5f;
+    --primary-solid: #2c5282;
+    --primary-solid-hover: #1e3a5f;
     --primary-soft: #ebf2fa;
     --accent: #3182ce;
     --success: #2f7d4f;
     --error: #c53030;
     --error-bg: #fff5f5;
-    --warn: #b7791f;
+    /* ‏#b7791f كان 3.50:1 على --warn-bg — تحت عتبة WCAG AA (4.5) */
+    --warn: #96631a;
     --warn-bg: #fffaf0;
     --code-bg: #1e293b;
     --code-text: #e2e8f0;
@@ -45,7 +54,17 @@ try {
     --code-string: #9ae6b4;
     --code-number: #f6ad55;
     --code-fn: #90cdf4;
-    --code-comment: #718096;
+    /* ‏#718096 كان 3.64:1 على --code-bg الفاتح */
+    --code-comment: #8593a8;
+
+    /* شارات فئات الدوال — كانت 14 قيمة سداسية خام خارج نظام الرموز */
+    --cat-logic-bg: #fef3c7;   --cat-logic-fg: #92400e;
+    --cat-math-bg: #dbeafe;    --cat-math-fg: #1e40af;
+    --cat-text-bg: #dcfce7;    --cat-text-fg: #166534;
+    --cat-count-bg: #fce7f3;   --cat-count-fg: #9d174d;
+    --cat-date-bg: #ede9fe;    --cat-date-fg: #5b21b6;
+    --cat-lookup-bg: #ffedd5;  --cat-lookup-fg: #9a3412;
+    --cat-check-bg: #e0e7ff;   --cat-check-fg: #3730a3;
     --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
     --shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
     --radius: 8px;
@@ -66,8 +85,13 @@ try {
     --text-mute: #8b93aa;
     --toast-bg: #e8eaf0;
     --toast-text: #12141c;
-    --primary: #4a7fc1;
-    --primary-hover: #5a8fd1;
+    /* ‏#4a7fc1 رسب في الدورين معاً: 4.08:1 كمقدمة على السطح، و4.12:1
+       كخلفية تحت نص أبيض. فأصبح لكل دور قيمته. */
+    --primary: #7aa9e0;
+    --primary-hover: #93bbe9;
+    --primary-solid: #3c6ba8;
+    /* ‏#4a7fc1 كان يعيد 4.12:1 من الباب الخلفي عبر حالة hover */
+    --primary-solid-hover: #4574ae;
     --primary-soft: #1a2a3d;
     --accent: #5a9fd4;
     --success: #4ade80;
@@ -78,6 +102,14 @@ try {
     --code-bg: #0d1117;
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
     --shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+
+    --cat-logic-bg: #3d2a00;   --cat-logic-fg: #fbbf24;
+    --cat-math-bg: #0a1f3d;    --cat-math-fg: #60a5fa;
+    --cat-text-bg: #0a2a1a;    --cat-text-fg: #4ade80;
+    --cat-count-bg: #2a0a1f;   --cat-count-fg: #f472b6;
+    --cat-date-bg: #1a0a2a;    --cat-date-fg: #c084fc;
+    --cat-lookup-bg: #2a1200;  --cat-lookup-fg: #fb923c;
+    --cat-check-bg: #0f1040;   --cat-check-fg: #818cf8;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -109,6 +141,23 @@ try {
     padding: 0; margin: -1px; overflow: hidden;
     clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
   }
+
+  /* رابط تخطٍّ: مخفي حتى يصله التركيز بلوحة المفاتيح */
+  .skip-link {
+    position: absolute; inset-inline-start: -9999px; top: 8px;
+    background: var(--primary-solid); color: #fff;
+    padding: 10px 18px; border-radius: var(--radius-sm);
+    z-index: 200; text-decoration: none; font-size: 14px;
+  }
+  .skip-link:focus { inset-inline-start: 8px; }
+
+  /* مفتاح وضع الإخراج في ترويسة لوح الناتج */
+  .mode-toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-soft); cursor: pointer;
+    user-select: none;
+  }
+  .mode-toggle input { cursor: pointer; accent-color: var(--primary-solid); }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -239,10 +288,12 @@ try {
   }
   .btn:hover { background: var(--surface-2); border-color: var(--text-mute); }
   .btn-primary {
-    background: var(--primary); color: white; border-color: var(--primary);
+    background: var(--primary-solid); color: white; border-color: var(--primary-solid);
     padding: 9px 22px; font-size: 14px; font-weight: 600;
   }
-  .btn-primary:hover { background: var(--primary-hover); border-color: var(--primary-hover); }
+  .btn-primary:hover {
+    background: var(--primary-solid-hover); border-color: var(--primary-solid-hover);
+  }
   .btn-icon { font-size: 14px; }
 
   .status {
@@ -276,7 +327,7 @@ try {
     display: block; width: 100%; font: inherit; color: inherit;
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius-sm); padding: 14px 16px;
-    cursor: pointer; transition: all 0.15s ease; text-align: right;
+    cursor: pointer; transition: all 0.15s ease; text-align: start;
   }
   .example-card:hover {
     border-color: var(--primary); background: var(--primary-soft);
@@ -317,7 +368,9 @@ try {
     transition: all 0.15s ease; font-family: inherit;
   }
   .filter-btn:hover { border-color: var(--text-mute); }
-  .filter-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+  .filter-btn.active {
+    background: var(--primary-solid); color: white; border-color: var(--primary-solid);
+  }
 
   .ref-table-wrap {
     background: var(--surface); border: 1px solid var(--border);
@@ -326,7 +379,7 @@ try {
   .ref-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .ref-table thead { background: var(--surface-2); }
   .ref-table th {
-    padding: 12px 16px; text-align: right; font-weight: 600; font-size: 12px;
+    padding: 12px 16px; text-align: start; font-weight: 600; font-size: 12px;
     color: var(--text-soft); text-transform: uppercase; letter-spacing: 0.5px;
     border-bottom: 1px solid var(--border);
   }
@@ -347,13 +400,13 @@ try {
     display: inline-block; padding: 2px 8px;
     border-radius: 3px; font-size: 11px; font-weight: 600;
   }
-  .ref-cat.logic   { background: #fef3c7; color: #92400e; }
-  .ref-cat.math    { background: #dbeafe; color: #1e40af; }
-  .ref-cat.text    { background: #dcfce7; color: #166534; }
-  .ref-cat.count   { background: #fce7f3; color: #9d174d; }
-  .ref-cat.date    { background: #ede9fe; color: #5b21b6; }
-  .ref-cat.lookup  { background: #ffedd5; color: #9a3412; }
-  .ref-cat.check   { background: #e0e7ff; color: #3730a3; }
+  .ref-cat.logic   { background: var(--cat-logic-bg);  color: var(--cat-logic-fg); }
+  .ref-cat.math    { background: var(--cat-math-bg);   color: var(--cat-math-fg); }
+  .ref-cat.text    { background: var(--cat-text-bg);   color: var(--cat-text-fg); }
+  .ref-cat.count   { background: var(--cat-count-bg);  color: var(--cat-count-fg); }
+  .ref-cat.date    { background: var(--cat-date-bg);   color: var(--cat-date-fg); }
+  .ref-cat.lookup  { background: var(--cat-lookup-bg); color: var(--cat-lookup-fg); }
+  .ref-cat.check   { background: var(--cat-check-bg);  color: var(--cat-check-fg); }
 
   footer {
     margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--border);
@@ -430,6 +483,13 @@ try {
     .btn-primary { width: 100%; justify-content: center; }
     .convert-hint { display: none; }
 
+    /* أهداف لمس: كانت 33–38px، وتوصية WCAG 2.5.5 هي 44px */
+    .btn, .filter-btn, .theme-toggle, .ref-search, .example-card {
+      min-height: 44px;
+    }
+    .theme-toggle { width: 44px; }
+    .filter-btn { display: inline-flex; align-items: center; }
+
     /* Editor أكبر على الجوال */
     .editor-highlight,
     .editor-input { min-height: 120px; font-size: 14px; }
@@ -467,14 +527,34 @@ try {
     .filter-btn { white-space: nowrap; }
   }
 
-  /* تحسين الـ ref-cat pills في الـ dark mode */
-  [data-theme="dark"] .ref-cat.logic  { background: #3d2a00; color: #fbbf24; }
-  [data-theme="dark"] .ref-cat.math   { background: #0a1f3d; color: #60a5fa; }
-  [data-theme="dark"] .ref-cat.text   { background: #0a2a1a; color: #4ade80; }
-  [data-theme="dark"] .ref-cat.count  { background: #2a0a1f; color: #f472b6; }
-  [data-theme="dark"] .ref-cat.date   { background: #1a0a2a; color: #c084fc; }
-  [data-theme="dark"] .ref-cat.lookup { background: #2a1200; color: #fb923c; }
-  [data-theme="dark"] .ref-cat.check  { background: #0f1040; color: #818cf8; }
+  /* ملاحظة: نسخة الوضع الليلي لشارات الفئات صارت متغيّرات في
+     [data-theme="dark"] أعلاه — لا حاجة لقواعد مكرّرة هنا. */
+
+  /* ===== الطباعة / تصدير PDF =====
+     الناتج كود يُشارَك، فالطباعة حالة استعمال حقيقية: نلغي القصّ
+     الرأسي، ونخفي ما لا معنى له على الورق، ونعيد الكود لألوان فاتحة. */
+  @media print {
+    .convert-bar, .theme-toggle, .examples-section,
+    .ref-toolbar, .panel-header .actions, .skip-link { display: none !important; }
+
+    html, body { background: #fff; color: #000; }
+    .container { max-width: none; padding: 0; }
+
+    .panel, .ref-table-wrap { box-shadow: none; break-inside: avoid; }
+
+    /* بلا هذين السطرين يُقصّ الكود الطويل عند 480px ويضيع باقيه */
+    .output-wrap {
+      max-height: none; min-height: 0; overflow: visible;
+      background: #fff; color: #000; border: 1px solid #999;
+    }
+    .code-content { white-space: pre-wrap; }
+    .code-keyword, .code-string, .code-number, .code-fn, .code-comment { color: #000; }
+    .line-numbers { color: #666; background: none; }
+
+    .editor-highlight, .editor-input { min-height: 0; }
+    .main-grid { grid-template-columns: 1fr; gap: 12px; }
+    .ref-table { min-width: 0; }
+  }
 </style>
 </head>
 <body>
@@ -484,6 +564,8 @@ try {
     هذه الأداة تعمل بالكامل داخل المتصفح عبر JavaScript. الرجاء تفعيل JavaScript لاستخدامها.
   </p>
 </noscript>
+
+<a class="skip-link" href="#main">تخطَّ إلى المحتوى الرئيسي</a>
 
 <div class="container">
 
@@ -533,6 +615,11 @@ try {
       <div class="panel-header">
         <h2>⚡ كود JavaScript الناتج</h2>
         <div class="actions">
+          <label class="mode-toggle" for="range-mode"
+                 title="النطاق يصير باراميتراً واحداً يستقبل مصفوفة، بدل باراميتر لكل خلية">
+            <input type="checkbox" id="range-mode">
+            النطاقات كمصفوفات
+          </label>
           <button type="button" class="btn" id="btn-copy" title="نسخ الكود">
             <span class="btn-icon" aria-hidden="true">📋</span> نسخ
           </button>
@@ -571,10 +658,10 @@ try {
       <table class="ref-table">
         <thead>
           <tr>
-            <th>الفئة</th>
-            <th>الدالة</th>
-            <th>المكافئ في JavaScript</th>
-            <th>الوصف</th>
+            <th scope="col">الفئة</th>
+            <th scope="col">الدالة</th>
+            <th scope="col">المكافئ في JavaScript</th>
+            <th scope="col">الوصف</th>
           </tr>
         </thead>
         <tbody id="ref-table-body"></tbody>
@@ -586,7 +673,7 @@ try {
   </main>
 
   <footer>
-    أداة محلية مستقلة • تعمل بدون إنترنت • النسخة 3.1.2 • <span id="fn-count-footer"></span> دالة
+    أداة محلية مستقلة • تعمل بدون إنترنت • النسخة 3.1.3 • <span id="fn-count-footer"></span> دالة
   </footer>
 </div>
 
