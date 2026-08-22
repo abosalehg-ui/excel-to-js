@@ -16,6 +16,20 @@
 }`
     },
 
+    // _add: جمع بدلالات Excel — عملية حسابية دائماً، لا دمج نصّي.
+    // ‏JS: "5" + "3" = "53"، بينما Excel: =A1+A2 على النصّين = 8.
+    // الخلية الفارغة (null/undefined/"") صفر كما في Excel، وما لا يقبل
+    // التحويل رقماً يعطي ‎#VALUE!‎ لا NaN صامتاً.
+    _add: {
+      code: `function _add(a, b) {
+  const blank = (v) => v === null || v === undefined || v === '';
+  const x = blank(a) ? 0 : Number(a);
+  const y = blank(b) ? 0 : Number(b);
+  if (isNaN(x) || isNaN(y)) return '#VALUE!';
+  return x + y;
+}`
+    },
+
     // _toDate: توحيد قبول التاريخ — Date كما هي، وأي شيء آخر يمرّ على new Date
     _toDate: {
       code: `function _toDate(v) {

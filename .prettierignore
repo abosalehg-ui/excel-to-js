@@ -1,7 +1,9 @@
 node_modules/
 package-lock.json
+coverage/
 
 # تقارير المراجعة: جداول عربية طويلة يفسدها إعادة التنسيق
 REVIEW.md
 REVIEW-2.md
 CODE_REVIEW_*.md
+MIHAK_REVIEW_*.md

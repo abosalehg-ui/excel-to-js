@@ -261,9 +261,10 @@ test('Generator', 'Range 2D عند VLOOKUP (matrixArgs)', () => {
   assertContains(r.expr, '[[b1, c1], [b2, c2]]');
 });
 
-test('Generator', 'Binary + → " + "', () => {
+test('Generator', 'Binary + → _add (لا دمج نصّي)', () => {
   const r = generate(parse(tokenize('A1+B1')));
-  assertEqual(r.expr, '(a1 + b1)');
+  assertEqual(r.expr, '_add(a1, b1)');
+  assertEqual(r.usedHelpers.includes('_add'), true);
 });
 
 test('Generator', 'Comparison = → _eq (بدلالات Excel غير الحساسة للحالة)', () => {
@@ -343,7 +344,7 @@ test('Generator', 'فحص مركزي للوسائط: IFERROR بوسيط واحد
 
 test('Generator', 'IFERROR لا يكرر تعبير البديل في الكود المولّد', () => {
   const r = generate(parse(tokenize('IFERROR(A1, B1+C1)')));
-  const occurrences = r.expr.split('(b1 + c1)').length - 1;
+  const occurrences = r.expr.split('_add(b1, c1)').length - 1;
   assertEqual(occurrences, 1);
 });
 
@@ -1027,4 +1028,126 @@ test('Limits', 'rangeParams يحترم حد إجمالي الخلايا', () => 
     () => convertFormula('=SUM(A1:A1000,B1:B1000,C1:C500)', { rangeParams: true }),
     'أكثر من 2000 خلية'
   );
+});
+
+/* =========================================================
+   9) دلالات Excel — الجولة الثالثة (مِحَك 2026-08-22)
+   كل اختبار هنا يحرس فرعاً كان غير مغطّى فمرّ منه خطأ صامت.
+   ========================================================= */
+
+test('Excel Semantics', '+ يجمع النص الرقمي ولا يدمجه', () => {
+  // الفرع غير المغطّى: "5" + "3" في JS = "53"، وفي Excel = 8.
+  // القيم الجاية من JSON.parse أو <input> أو CSV تصل نصوصاً دائماً.
+  assertEqual(runFormula('=A1+A2', { a1: '5', a2: '3' }), 8);
+  assertEqual(runFormula('=A1+A2', { a1: '5', a2: 3 }), 8);
+  assertEqual(runFormula('=A1+A2+A3', { a1: '1', a2: '2', a3: '3' }), 6);
+});
+
+test('Excel Semantics', '+ يعطي #VALUE! لنص غير رقمي', () => {
+  assertEqual(runFormula('=A1+A2', { a1: 'نص', a2: 5 }), '#VALUE!');
+  assertEqual(runFormula('=A1+A2', { a1: 5, a2: 'abc' }), '#VALUE!');
+});
+
+test('Excel Semantics', '+ يعامل الخلية الفارغة صفراً', () => {
+  assertEqual(runFormula('=A1+A2', { a1: null, a2: 5 }), 5);
+  assertEqual(runFormula('=A1+A2', { a1: undefined, a2: 5 }), 5);
+  assertEqual(runFormula('=A1+A2', { a1: '', a2: 5 }), 5);
+});
+
+test('Excel Semantics', '+ يبقي الحساب العادي والأولويات سليمة', () => {
+  assertEqual(runFormula('=2+3*4', {}), 14);
+  assertEqual(runFormula('=(2+3)*4', {}), 20);
+  assertEqual(runFormula('=A1+A2', { a1: 1.5, a2: 2.25 }), 3.75);
+  assertEqual(runFormula('=A1+A2', { a1: true, a2: 1 }), 2);
+});
+
+test('Excel Semantics', 'TRIM تطوي المسافات الداخلية', () => {
+  // ‏String.trim تحذف الأطراف فقط — وطيّ الداخل هو غرض TRIM الأساسي
+  assertEqual(runFormula('=TRIM(A1)', { a1: ' a   b ' }), 'a b');
+  assertEqual(runFormula('=TRIM(A1)', { a1: 'محمد   بن   علي' }), 'محمد بن علي');
+  assertEqual(runFormula('=TRIM(A1)', { a1: '  hello  ' }), 'hello');
+  assertEqual(runFormula('=TRIM(A1)', { a1: 'a\t\tb' }), 'a b');
+  assertEqual(runFormula('=TRIM(A1)', {}), '');
+});
+
+test('Excel Semantics', 'REPLACE ترفض الوسيط غير الصالح', () => {
+  assertEqual(runFormula('=REPLACE(A1,-3,2,"X")', { a1: 'HELLO' }), '#VALUE!');
+  assertEqual(runFormula('=REPLACE(A1,0,2,"X")', { a1: 'HELLO' }), '#VALUE!');
+  assertEqual(runFormula('=REPLACE(A1,2,-1,"X")', { a1: 'HELLO' }), '#VALUE!');
+  // الحالة الصالحة تبقى كما هي
+  assertEqual(runFormula('=REPLACE(A1,2,3,"XY")', { a1: 'abcdef' }), 'aXYef');
+  assertEqual(runFormula('=REPLACE(A1,1,0,"X")', { a1: 'abc' }), 'Xabc');
+});
+
+test('Excel Semantics', 'الحرفيّ النصّي لا يسرّب </script>', () => {
+  // مولّد الكود مسؤول عن سلامة مخرجه: نص فيه </script> كان يخرج حرفياً
+  // فيُنهي وسم script مضمّناً في صفحة من يلصق الناتج
+  const code = convertFormula('=A1&"</scr' + 'ipt>"').code;
+  assertEqual(code.indexOf('</scr' + 'ipt>'), -1, 'ما يصحّ يظهر الوسم خاماً');
+  assertContains(code, '<\\/scr' + 'ipt>');
+  // والقيمة وقت التشغيل تبقى النص الأصلي بلا تشويه
+  assertEqual(runFormula('=A1&"</scr' + 'ipt>"', { a1: 'x' }), 'x</scr' + 'ipt>');
+});
+
+test('Excel Semantics', 'الحرفيّ النصّي يهرّب U+2028/U+2029', () => {
+  const code = convertFormula('=A1&"a b"').code;
+  assertEqual(code.indexOf(' '), -1, 'U+2028 ما يصحّ يخرج خاماً');
+  assertContains(code, '\\u2028');
+  assertEqual(runFormula('=A1&"a b"', { a1: '' }), 'a b');
+});
+
+test('Excel Semantics', '"<" وحده يبقى بلا تهريب (شرط COUNTIF شائع)', () => {
+  // تهريب كل "<" كان يشوّه "<5" إلى "\x3C5" بلا فائدة أمنية
+  assertContains(convertFormula('=COUNTIF(A1:A3,"<5")').code, '"<5"');
+  assertEqual(runFormula('=COUNTIF(A1:A3,"<5")', { a1: 1, a2: 9, a3: 4 }), 2);
+});
+
+test('Limits', 'سلسلة معاملات أحادية طويلة تُرفض بلا كسر المكدّس', () => {
+  // كانت تتجاوز parseDepth كلياً (المطبَّق في parsePrimary وحدها)
+  // فتنتهي بـRangeError إنجليزي خام أو برسالة "الرجاء الإبلاغ" المضلّلة
+  assertThrows(() => convertFormula('=' + '-'.repeat(5000) + 'A1'), 'سلسلة معاملات');
+  assertThrows(
+    () => convertFormula('=' + '-'.repeat(LIMITS.parseDepth + 1) + 'A1'),
+    'سلسلة معاملات'
+  );
+  // وتحت الحد تشتغل عادي بالإشارة الصحيحة
+  assertEqual(runFormula('=' + '-'.repeat(64) + 'A1', { a1: 7 }), 7);
+  assertEqual(runFormula('=' + '-'.repeat(63) + 'A1', { a1: 7 }), -7);
+});
+
+test('Limits', 'سلسلة لواحق % طويلة تُرفض بلا كسر المكدّس', () => {
+  assertThrows(() => convertFormula('=1' + '%'.repeat(5000)), 'سلسلة معاملات');
+  assertClose(runFormula('=100%%', {}), 0.01);
+});
+
+test('Limits', 'خطأ سلسلة المعاملات يحمل موضعاً قابلاً للتعليم', () => {
+  // كل أخطاء المحوّل تحمل start/end ليعلّمها المحرر — والـRangeError
+  // الخام كان النمط الوحيد اللي يخرق هذا التعاقد
+  let err = null;
+  try {
+    convertFormula('=' + '-'.repeat(200) + 'A1');
+  } catch (e) {
+    err = e;
+  }
+  assertEqual(err !== null, true);
+  assertEqual(typeof err.start, 'number');
+  assertEqual(typeof err.end, 'number');
+});
+
+test('Limits', 'الفحص النحوي حارس تطوير: شغّال في Node ومطفأ في الصفحة', () => {
+  // ثمنه في المتصفح كان 'unsafe-eval' في الـCSP، وفائدته التقاط أخطاء
+  // الـgenerator — وهي مهمة حزمة الاختبارات لا مهمة صفحة المستخدم.
+  const NS = globalThis.ExcelToJS;
+  assertEqual(typeof window === 'undefined', true, 'حزمة Node تشتغل بلا window');
+  // الافتراضي في Node: شغّال — فصيغة سليمة تمرّ وأي كسر نحوي يُلتقط
+  assertEqual(NS.SYNTAX_CHECK, undefined, 'ما فيه تجاوز صريح');
+  assertContains(convertFormula('=A1+1').code, '_add(a1, 1)');
+  // الإطفاء الصريح لا يغيّر الناتج — الحارس فحص لا تحويل
+  const before = convertFormula('=SUM(A1:A3)').code;
+  NS.SYNTAX_CHECK = false;
+  try {
+    assertEqual(convertFormula('=SUM(A1:A3)').code, before);
+  } finally {
+    delete NS.SYNTAX_CHECK;
+  }
 });

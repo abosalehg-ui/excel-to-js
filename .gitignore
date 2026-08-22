@@ -4,3 +4,5 @@ npm-debug.log*
 Thumbs.db
 .idea/
 .vscode/
+coverage/
+.nyc_output/

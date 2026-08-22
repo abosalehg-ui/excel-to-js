@@ -29,8 +29,34 @@
     check: 'فحص'
   };
 
+  /* ----- الأمثلة السريعة — بيانات محضة، فمكانها خارج منطق الـDOM ----- */
+  const EXAMPLES = [
+    { label: 'شرط بسيط', cat: 'logic', formula: '=IF(A1>10,"كبير","صغير")' },
+    { label: 'مجموع نطاق', cat: 'math', formula: '=SUM(A1:A10)' },
+    { label: 'متوسط', cat: 'math', formula: '=AVERAGE(B1:B5)' },
+    { label: 'دمج نصوص', cat: 'text', formula: '=CONCATENATE("الإجمالي: ",A1," ر.س")' },
+    { label: 'بحث عمودي', cat: 'lookup', formula: '=VLOOKUP(A2,B1:D10,3,FALSE)' },
+    { label: 'بحث + INDEX/MATCH', cat: 'lookup', formula: '=INDEX(C1:C10,MATCH(A2,B1:B10,0))' },
+    { label: 'عدّ بشرط', cat: 'count', formula: '=COUNTIF(A1:A20,">100")' },
+    { label: 'عدّ بشروط متعددة', cat: 'count', formula: '=COUNTIFS(A1:A10,">0",B1:B10,"معتمد")' },
+    { label: 'استخراج جزء نص', cat: 'text', formula: '=MID(A1,3,5)' },
+    { label: 'استبدال نص', cat: 'text', formula: '=SUBSTITUTE(A1,"-","/")' },
+    { label: 'الفرق بين تاريخين', cat: 'date', formula: '=DATEDIF(A1,B1,"D")' },
+    { label: 'إضافة شهور', cat: 'date', formula: '=EDATE(A1,3)' },
+    { label: 'سنة من تاريخ', cat: 'date', formula: '=YEAR(TODAY())' },
+    { label: 'تاريخ مخصص', cat: 'date', formula: '=DATE(2026,6,15)' },
+    { label: 'فحص خلية فارغة', cat: 'check', formula: '=IF(ISBLANK(A1),"فارغ","موجود")' },
+    { label: 'فحص رقم', cat: 'check', formula: '=IF(ISNUMBER(A1),A1*2,0)' },
+    { label: 'الجذر التربيعي', cat: 'math', formula: '=SQRT(POWER(A1,2)+POWER(B1,2))' },
+    { label: 'باقي القسمة', cat: 'math', formula: '=IF(MOD(A1,2)=0,"زوجي","فردي")' }
+  ];
+
   const DARK_KEY = 'excel-converter-theme';
   const AUTO_CONVERT_DELAY = 300;
+  // فوق هذا العدد يصير التوقيع غير عملي فنقترح وضع النطاقات كمصفوفات
+  const PARAM_NUDGE_THRESHOLD = 15;
+  // قفزة طول أكبر من هذا = لصق لا كتابة، فيُعرض الخطأ كاملاً بلا انتظار
+  const PASTE_JUMP = 10;
   const UNDO_WINDOW = 8000;
 
   /* ============================================================
@@ -202,11 +228,26 @@
       });
     }
 
+    /* ----- حالة الخطأ على الحقل نفسه -----
+     التعليم البصري (.err-mark) مرئي بحت — قارئ الشاشة عند التركيز على
+     المحرر ما كان يعرف إن فيه خطأ أصلاً ولا وش هو. */
+    function setFieldError(hasError) {
+      if (hasError) {
+        $input.setAttribute('aria-invalid', 'true');
+        $input.setAttribute('aria-describedby', 'status');
+      } else {
+        $input.removeAttribute('aria-invalid');
+        $input.removeAttribute('aria-describedby');
+      }
+    }
+
     /* ----- عرض الكود الناتج ----- */
-    function showOutput(code) {
+    // hint: نص يظهر مكان "سيظهر الكود هنا…" حين يفشل التحويل الصامت،
+    // فلا تبقى اللوحة فاضية بلا أي تفسير (كان طريقاً مسدوداً كاملاً)
+    function showOutput(code, hint) {
       clear($output);
       if (!code) {
-        $output.appendChild(el('div', 'code-empty', 'سيظهر الكود هنا بعد التحويل…'));
+        $output.appendChild(el('div', 'code-empty', hint || 'سيظهر الكود هنا بعد التحويل…'));
         $outputInfo.style.display = 'none';
         return;
       }
@@ -245,6 +286,17 @@
       if (usedHelpers && usedHelpers.length > 0) {
         $outputInfo.appendChild(item('🔧 Helpers مولّدة: ', usedHelpers.join(', ')));
       }
+      // توقيع بعشرات الباراميترات غير قابل للاستدعاء عملياً، والحل موجود
+      // في المنتج — لكن المستخدم كان لازم يكتشف المفتاح بنفسه
+      if (paramNames.length > PARAM_NUDGE_THRESHOLD && $rangeMode && !$rangeMode.checked) {
+        $outputInfo.appendChild(
+          el(
+            'span',
+            'info-item info-nudge',
+            `💡 عدد الباراميترات كبير (${paramNames.length}) — جرّب وضع «النطاقات كمصفوفات»`
+          )
+        );
+      }
       $outputInfo.style.display = 'flex';
     }
 
@@ -276,6 +328,7 @@
           rangeParams: !!($rangeMode && $rangeMode.checked)
         });
         lastCode = code;
+        setFieldError(false);
         renderHighlight(input);
         showOutput(code);
         showOutputInfo(paramNames, usedHelpers, usedRanges);
@@ -292,11 +345,17 @@
       } catch (e) {
         lastCode = '';
         if (silent) {
+          // الفشل الصامت كان يترك اللوحة فاضية بلا أي تفسير: مستخدم يلصق
+          // صيغة فيها دالة غير مدعومة ما يرى شيئاً ولا يعرف إن زر «تحويل»
+          // يخبره بالسبب. الكتابة الجارية تبقى صامتة (الصيغة نصف المكتوبة
+          // خاطئة دائماً)، أما اللصق فيُعرض خطؤه كاملاً.
           hideStatus();
-          showOutput('');
+          setFieldError(false);
+          showOutput('', 'الصيغة غير مكتملة أو غير مدعومة — اضغط «تحويل» للتفاصيل');
           renderHighlight(input);
           return;
         }
+        setFieldError(true);
         showOutput('');
         if (typeof e.start === 'number') {
           renderHighlight(input, { start: e.start, end: e.end || e.start + 1 });
@@ -379,6 +438,8 @@
       }
       clearedValue = $input.value;
       $input.value = '';
+      lastInputLength = 0;
+      setFieldError(false);
       renderHighlight('');
       showOutput('');
       hideStatus();
@@ -393,6 +454,7 @@
     $btnUndo.addEventListener('click', () => {
       if (clearedValue === null) return;
       $input.value = clearedValue;
+      lastInputLength = clearedValue.length;
       hideUndo();
       renderHighlight($input.value);
       doConvert();
@@ -410,10 +472,24 @@
       });
     }
 
+    // اللصق يصل كحدث input أيضاً؛ نميّزه بقفزة الطول لأن حدث paste وحده
+    // يسبق تحديث القيمة، ولأن السحب-والإفلات لا يطلق paste إطلاقاً
+    let lastInputLength = 0;
     $input.addEventListener('input', () => {
+      const len = $input.value.length;
+      const pasted = len - lastInputLength > PASTE_JUMP;
+      lastInputLength = len;
       scheduleHighlight();
-      scheduleConvert();
       hideUndo();
+      if (pasted) {
+        if (convertTimer) {
+          clearTimeout(convertTimer);
+          convertTimer = null;
+        }
+        doConvert();
+        return;
+      }
+      scheduleConvert();
     });
     $input.addEventListener('scroll', () => {
       $highlight.scrollTop = $input.scrollTop;
@@ -431,27 +507,6 @@
     });
 
     /* ----- الأمثلة السريعة ----- */
-    const EXAMPLES = [
-      { label: 'شرط بسيط', cat: 'logic', formula: '=IF(A1>10,"كبير","صغير")' },
-      { label: 'مجموع نطاق', cat: 'math', formula: '=SUM(A1:A10)' },
-      { label: 'متوسط', cat: 'math', formula: '=AVERAGE(B1:B5)' },
-      { label: 'دمج نصوص', cat: 'text', formula: '=CONCATENATE("الإجمالي: ",A1," ر.س")' },
-      { label: 'بحث عمودي', cat: 'lookup', formula: '=VLOOKUP(A2,B1:D10,3,FALSE)' },
-      { label: 'بحث + INDEX/MATCH', cat: 'lookup', formula: '=INDEX(C1:C10,MATCH(A2,B1:B10,0))' },
-      { label: 'عدّ بشرط', cat: 'count', formula: '=COUNTIF(A1:A20,">100")' },
-      { label: 'عدّ بشروط متعددة', cat: 'count', formula: '=COUNTIFS(A1:A10,">0",B1:B10,"معتمد")' },
-      { label: 'استخراج جزء نص', cat: 'text', formula: '=MID(A1,3,5)' },
-      { label: 'استبدال نص', cat: 'text', formula: '=SUBSTITUTE(A1,"-","/")' },
-      { label: 'الفرق بين تاريخين', cat: 'date', formula: '=DATEDIF(A1,B1,"D")' },
-      { label: 'إضافة شهور', cat: 'date', formula: '=EDATE(A1,3)' },
-      { label: 'سنة من تاريخ', cat: 'date', formula: '=YEAR(TODAY())' },
-      { label: 'تاريخ مخصص', cat: 'date', formula: '=DATE(2026,6,15)' },
-      { label: 'فحص خلية فارغة', cat: 'check', formula: '=IF(ISBLANK(A1),"فارغ","موجود")' },
-      { label: 'فحص رقم', cat: 'check', formula: '=IF(ISNUMBER(A1),A1*2,0)' },
-      { label: 'الجذر التربيعي', cat: 'math', formula: '=SQRT(POWER(A1,2)+POWER(B1,2))' },
-      { label: 'باقي القسمة', cat: 'math', formula: '=IF(MOD(A1,2)=0,"زوجي","فردي")' }
-    ];
-
     for (const ex of EXAMPLES) {
       // <button> لا <div>: يحلّ التنقل بلوحة المفاتيح والدلالة والتفعيل بـEnter/Space
       const card = el('button', 'example-card');
@@ -465,6 +520,7 @@
       card.appendChild(el('div', 'formula', ex.formula));
       card.addEventListener('click', () => {
         $input.value = ex.formula;
+        lastInputLength = ex.formula.length;
         hideUndo();
         doConvert();
         $input.focus();
@@ -486,6 +542,9 @@
       tdCat.appendChild(el('span', `ref-cat ${info.cat}`, CAT_LABELS[info.cat]));
       const tdName = doc.createElement('td');
       tdName.appendChild(el('span', 'fn-name', name));
+      // على الجوال يُخفى عمود الوصف ويُعرض من هنا عبر ::after بدل
+      // ما تضيع المعلومة كلياً (القاعدة في index.html)
+      tdName.dataset.desc = info.desc;
       const tdEquiv = doc.createElement('td');
       tdEquiv.appendChild(el('span', 'js-equiv', info.jsEquiv));
       const tdDesc = doc.createElement('td');
@@ -571,8 +630,9 @@
   NS.tokenizeJS = tokenizeJS;
   NS.initUI = initUI;
   NS.CAT_LABELS = CAT_LABELS;
+  NS.EXAMPLES = EXAMPLES;
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { tokenizeJS, initUI, CAT_LABELS };
+    module.exports = { tokenizeJS, initUI, CAT_LABELS, EXAMPLES };
   }
 
   // تشغيل تلقائي في المتصفح فقط — في Node تُستورَد الوحدة بلا آثار جانبية.
