@@ -4,14 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <!-- GitHub Pages لا يسمح بترويسات مخصصة، لكن وسم meta متاح.
-     ‏'unsafe-eval' مطلوب لشبكة الأمان النحوية (new Function) في engine.js —
-     وهي تُصرِّف الكود المولّد ولا تنفّذه.
-     ‏script-src بلا 'unsafe-inline': السكربت المضمّن الوحيد (تطبيق الثيم)
-     مسموح بـhash محسوب من محتواه. أي تعديل عليه يكسر الـhash، ولذلك
-     يوجد اختبار يعيد حسابه ويقارنه (UI: CSP guard).
+     ‏script-src بلا 'unsafe-inline' وبلا 'unsafe-eval': السكربت المضمّن
+     الوحيد (تطبيق الثيم) مسموح بـhash محسوب من محتواه. أي تعديل عليه
+     يكسر الـhash، ولذلك يوجد اختبار يعيد حسابه ويقارنه (UI: CSP guard).
+     ‏'unsafe-eval' كانت هنا لأجل شبكة الأمان النحوية (new Function) في
+     engine.js، وهي حارس تطوير تشغّله حزمة الاختبارات في Node — فأُطفئ
+     في المتصفح وسقط معه آخر سبب لإضعاف script-src.
      ‏style-src يبقى 'unsafe-inline' لأن في الصفحة سمات style مضمّنة. -->
 <meta http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self' 'sha256-DwGWZ7qCH7510jRxEOPtEks2MQyJhB/3XCxIOi8Uhtg=' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+      content="default-src 'none'; script-src 'self' 'sha256-DwGWZ7qCH7510jRxEOPtEks2MQyJhB/3XCxIOi8Uhtg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <title>محوّل صيغ Excel إلى JavaScript - V3</title>
 <script>
@@ -274,6 +275,7 @@ try {
     display: flex; gap: 16px; flex-wrap: wrap;
   }
   .output-info .info-item { display: inline-flex; align-items: center; gap: 4px; }
+  .output-info .info-nudge { color: var(--warn); font-weight: 500; }
   .output-info code {
     background: var(--surface); padding: 1px 5px; border-radius: 3px;
     font-family: 'Consolas', monospace; direction: ltr; font-size: 11px;
@@ -506,9 +508,22 @@ try {
     .ref-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .ref-table { min-width: 560px; }
 
-    /* إخفاء عمود الوصف على الجوال */
+    /* الوصف هو أنفع الأعمدة للمستخدم الجديد — كان يُخفى كلياً على
+       الجوال بلا بديل. بدل ذلك ننقله سطراً تحت اسم الدالة، فيبقى
+       الجدول ضيّقاً والمعلومة موجودة. */
     .ref-table th:nth-child(4),
     .ref-table td:nth-child(4) { display: none; }
+    .ref-table td:nth-child(2)::after {
+      content: attr(data-desc);
+      display: block;
+      margin-top: 4px;
+      font-size: 11.5px;
+      line-height: 1.5;
+      color: var(--text-soft);
+      font-family: inherit;
+      white-space: normal;
+    }
+    .ref-table { min-width: 420px; }
 
     /* الـ filter buttons: تمرير أفقي */
     /* في عمود، flex-basis يصبح ارتفاعاً — نعيد ضبطه صراحةً */
@@ -529,6 +544,18 @@ try {
 
   /* ملاحظة: نسخة الوضع الليلي لشارات الفئات صارت متغيّرات في
      [data-theme="dark"] أعلاه — لا حاجة لقواعد مكرّرة هنا. */
+
+  /* ===== وضع التباين العالي (forced-colors) =====
+     المحرر يعتمد نصاً شفافاً فوق طبقة تلوين. في هذا الوضع يفرض النظام
+     لون النص فيظهر نصّان متراكبان — نفس عطل "النص المزدوج" لكن لفئة
+     مستخدمين أخرى. نتنازل عن التلوين ونكسب القراءة. */
+  @media (forced-colors: active) {
+    .editor-highlight { display: none; }
+    .editor-input { color: CanvasText; caret-color: CanvasText; background: Canvas; }
+    .err-mark { border-bottom: 2px solid; }
+    .filter-btn.active, .btn-primary { forced-color-adjust: none; }
+    .output-wrap:focus-visible, .ref-table-wrap:focus-visible { outline: 2px solid Highlight; }
+  }
 
   /* ===== الطباعة / تصدير PDF =====
      الناتج كود يُشارَك، فالطباعة حالة استعمال حقيقية: نلغي القصّ
@@ -626,7 +653,11 @@ try {
         </div>
       </div>
       <div class="panel-body">
-        <div class="output-wrap" id="output-wrap">
+        <!-- tabindex: الحاوية تمرّر (overflow:auto) فلازم تُطال بلوحة
+             المفاتيح، وإلا كان الكود الطويل غير قابل للقراءة إطلاقاً
+             لمن لا يستعمل فأرة — WCAG 2.1.1 -->
+        <div class="output-wrap" id="output-wrap" tabindex="0" role="region"
+             aria-label="كود JavaScript الناتج">
           <div class="code-empty">سيظهر الكود هنا بعد التحويل…</div>
         </div>
         <div class="output-info" id="output-info" style="display:none"></div>
@@ -654,7 +685,7 @@ try {
       <input type="search" class="ref-search" id="ref-search"
              placeholder="ابحث باسم الدالة أو وصفها…" autocomplete="off">
     </div>
-    <div class="ref-table-wrap">
+    <div class="ref-table-wrap" tabindex="0" role="region" aria-label="جدول الدوال المدعومة">
       <table class="ref-table">
         <thead>
           <tr>
@@ -673,7 +704,7 @@ try {
   </main>
 
   <footer>
-    أداة محلية مستقلة • تعمل بدون إنترنت • النسخة 3.1.3 • <span id="fn-count-footer"></span> دالة
+    أداة محلية مستقلة • تعمل بدون إنترنت • النسخة 3.1.4 • <span id="fn-count-footer"></span> دالة
   </footer>
 </div>
 

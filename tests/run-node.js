@@ -85,6 +85,32 @@ if (fnBadge && Number(fnBadge[1]) !== fnActual) {
   fail++;
 }
 
+// أعداد الفئات في عناوين README كانت مكتوبة يدوياً وتتقادم صامتة:
+// إضافة دالة تعني تعديل ثلاثة مواضع، ولا شيء يمسك النسيان.
+const CAT_LABELS = globalThis.ExcelToJS.CAT_LABELS;
+const FN_BY_CAT = {};
+for (const info of Object.values(globalThis.ExcelToJS.FUNCTIONS)) {
+  FN_BY_CAT[info.cat] = (FN_BY_CAT[info.cat] || 0) + 1;
+}
+for (const [cat, count] of Object.entries(FN_BY_CAT)) {
+  const label = CAT_LABELS[cat];
+  const heading = new RegExp(`^### .*${label} \\((\\d+)\\)`, 'm');
+  const m = readme.match(heading);
+  if (!m) {
+    console.error(`✗ ما فيه عنوان في README لفئة "${label}"`);
+    fail++;
+  } else if (Number(m[1]) !== count) {
+    console.error(`✗ عدد فئة "${label}" في README (${m[1]}) لا يطابق الكود (${count})`);
+    fail++;
+  }
+}
+
+const fnTotalHeading = readme.match(/## 📋 الدوال المدعومة/);
+if (!fnTotalHeading) {
+  console.error('✗ ما لقيت قسم "الدوال المدعومة" في README');
+  fail++;
+}
+
 const testBadge = readme.match(/Tests-(\d+)%2F(\d+)/);
 if (testBadge && Number(testBadge[2]) !== TESTS.length) {
   console.error(

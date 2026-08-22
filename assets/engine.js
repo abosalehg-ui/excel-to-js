@@ -186,19 +186,45 @@
       }
       return left;
     }
+    // حارس مشترك لسلاسل المعاملات الأحادية واللواحق: كلاهما يبني عقداً
+    // متداخلة يمرّ عليها المولّد تعاوداً، فسلسلة طويلة تكسر المكدّس.
+    // ‏LIMITS.parseDepth كان مطبّقاً في parsePrimary وحدها، فسلسلة مثل
+    // "=-----…-A1" تتجاوزه كلياً وتنتهي بـRangeError إنجليزي خام أو
+    // برسالة "الرجاء الإبلاغ" المضلّلة من شبكة الأمان النحوية.
+    const checkChain = (n, tok) => {
+      if (n <= LIMITS.parseDepth) return;
+      const err = new Error(
+        `الصيغة معقّدة جداً: سلسلة معاملات أطول من الحد الأقصى (${LIMITS.parseDepth}). بسّطها أو قسّمها لخطوات.`
+      );
+      err.start = tok ? tok.start : 0;
+      err.end = tok ? tok.end : 1;
+      throw err;
+    };
+
+    // تكرار لا تعاود: السلسلة تُجمع في مصفوفة ثم تُبنى العقد من الداخل
+    // للخارج، فلا يتعلّق عمق المكدّس بطول السلسلة إطلاقاً.
     function parseUnary() {
-      if (peek() && peek().type === 'OPERATOR' && (peek().value === '-' || peek().value === '+')) {
-        const op = eat().value;
-        const arg = parseUnary();
-        return { type: 'Unary', op, arg };
+      const ops = [];
+      let first = peek();
+      while (
+        peek() &&
+        peek().type === 'OPERATOR' &&
+        (peek().value === '-' || peek().value === '+')
+      ) {
+        ops.push(eat().value);
+        checkChain(ops.length, first);
       }
-      return parsePostfix();
+      let node = parsePostfix();
+      for (let k = ops.length - 1; k >= 0; k--) node = { type: 'Unary', op: ops[k], arg: node };
+      return node;
     }
     // % في Excel لاحقة نسبة مئوية (50% = 0.5)، وليست عامل باقي قسمة
     function parsePostfix() {
       let node = parsePrimary();
+      let n = 0;
       while (peek() && peek().type === 'OPERATOR' && peek().value === '%') {
-        eat();
+        const tok = eat();
+        checkChain(++n, tok);
         node = { type: 'Percent', arg: node };
       }
       return node;
@@ -304,6 +330,22 @@
   // تعبير "بسيط" = تقييمه بلا تكلفة ولا أثر جانبي، فلا حاجة للفّه
   const SIMPLE_EXPR = /^(?:[A-Za-z_$][\w$]*|-?\d+(?:\.\d+)?|true|false|"(?:[^"\\]|\\.)*")$/;
 
+  /* ------------------------------------------------------------
+   jsString — حرفيّ نصّي آمن للتضمين في أي سياق
+   ------------------------------------------------------------
+   ‏JSON.stringify لا يهرّب "/"، فنص فيه "</script>" يخرج حرفياً
+   ويُنهي وسم <script> مضمّناً في صفحة من يلصق الكود المولّد.
+   ونهرّب U+2028/U+2029 لأنهما يكسران التضمين في JSON والأدوات
+   القديمة. لا نهرّب "<" وحده: "<5" شرط شائع في COUNTIF ولا داعي
+   لتشويهه إلى "\x3C5".
+   ------------------------------------------------------------ */
+  function jsString(value) {
+    return JSON.stringify(value)
+      .replace(/<\//g, '<\\/')
+      .replace(/\u2028/g, '\\u2028')
+      .replace(/\u2029/g, '\\u2029');
+  }
+
   // تحويل حرف العمود إلى رقمه (A=1, Z=26, AA=27) — على مستوى الوحدة
   // لأن naturalSort خارج generate يحتاجه أيضاً
   const colToNum = (c) => {
@@ -320,6 +362,142 @@
     }
     return s;
   };
+
+  const opMap = {
+    '<': '<',
+    '>': '>',
+    '<=': '<=',
+    '>=': '>=',
+    '+': '+',
+    '-': '-',
+    '*': '*',
+    '/': '/'
+  };
+
+  /* ------------------------------------------------------------
+   gen — يحوّل عقدة AST إلى نصّ تعبير JS
+   ------------------------------------------------------------
+   على مستوى الوحدة لا داخل generate: كانت generate تتجاوز 200 سطر
+   تحتضن ثمان دوال متداخلة. الحالة المشتركة تصل هنا صراحةً عبر state
+   بدل الإغلاق الضمني، فحدود المسؤولية تبقى ظاهرة.
+
+   state = { rangeParams, cellVar, expandRangeToMatrix, rangeParamName,
+             registerHelper, ctx }
+   ------------------------------------------------------------ */
+  function gen(node, state, opts = {}) {
+    const needsMatrix = opts.needsMatrix === true;
+
+    switch (node.type) {
+      case 'Number':
+        return String(node.value);
+      case 'String':
+        return jsString(node.value);
+      case 'Boolean':
+        return node.value ? 'true' : 'false';
+      case 'CellRef':
+        return state.cellVar(node.name);
+
+      case 'Range': {
+        if (state.rangeParams) {
+          // الباراميتر يصل دائماً كمصفوفة ثنائية؛ السياق المسطّح يفرده
+          const name = state.rangeParamName(node.start, node.end);
+          return needsMatrix ? name : `${name}.flat(Infinity)`;
+        }
+        const { matrix } = state.expandRangeToMatrix(node.start, node.end);
+        if (needsMatrix) {
+          const rowStrs = matrix.map((row) => `[${row.join(', ')}]`);
+          return `[${rowStrs.join(', ')}]`;
+        }
+        return `[${matrix.flat().join(', ')}]`;
+      }
+
+      case 'Unary':
+        return `(${node.op}${gen(node.arg, state)})`;
+
+      case 'Percent':
+        return `((${gen(node.arg, state)}) / 100)`;
+
+      case 'Binary': {
+        const L = gen(node.left, state);
+        const R = gen(node.right, state);
+        // الخلية الفارغة نص فارغ في Excel — String(undefined) كان يعطي "undefined"
+        if (node.op === '&') {
+          state.registerHelper('_str');
+          return `(_str(${L}) + _str(${R}))`;
+        }
+        // ‏'+' في Excel عملية حسابية دائماً، بينما '+' في JS يدمج
+        // النصوص لو أحد الطرفين نص — "5"+"3" كان يعطي "53" لا 8
+        if (node.op === '+') {
+          state.registerHelper('_add');
+          return `_add(${L}, ${R})`;
+        }
+        if (node.op === '^') return `Math.pow(${L}, ${R})`;
+        // = و <> بدلالات Excel: مقارنة النصوص غير حساسة لحالة الأحرف
+        if (node.op === '=') {
+          state.registerHelper('_eq');
+          return `_eq(${L}, ${R})`;
+        }
+        if (node.op === '<>') {
+          state.registerHelper('_eq');
+          return `(!_eq(${L}, ${R}))`;
+        }
+        return `(${L} ${opMap[node.op]} ${R})`;
+      }
+
+      case 'Call': {
+        const fn = FUNCTIONS[node.name];
+        if (!fn) {
+          const err = new Error(`الدالة "${node.name}" غير مدعومة في النسخة الحالية`);
+          err.start = node.start;
+          err.end = node.end;
+          err.unsupported = node.name;
+          throw err;
+        }
+
+        // فحص مركزي لعدد الوسائط حسب عقد الدالة (minArgs/maxArgs)
+        const argc = node.args.length;
+        const min = fn.minArgs ?? 0;
+        const max = fn.maxArgs ?? Infinity;
+        if (argc < min || argc > max) {
+          const expected = min === max ? `${min}` : max === Infinity ? `${min}+` : `${min}–${max}`;
+          const err = new Error(`الدالة ${node.name} تتوقع ${expected} من الوسائط، وُجد ${argc}`);
+          err.start = node.start;
+          err.end = node.end;
+          throw err;
+        }
+
+        if (fn.usesHelpers) {
+          for (const h of fn.usesHelpers) state.registerHelper(h);
+        }
+
+        const matrixArgs = fn.matrixArgs || [];
+        const compiledArgs = node.args.map((a, idx) =>
+          gen(a, state, { needsMatrix: matrixArgs.includes(idx) })
+        );
+
+        // ملء الوسائط الاختيارية المحذوفة من عقد الدالة، فيستقبل الـ
+        // generator مصفوفة مكتملة بلا فحص `x !== undefined` في كل دالة
+        if (fn.defaults) {
+          for (const key of Object.keys(fn.defaults)) {
+            const idx = Number(key);
+            if (idx >= argc) compiledArgs[idx] = fn.defaults[key];
+          }
+        }
+
+        try {
+          return fn.generator(compiledArgs, state.ctx);
+        } catch (e) {
+          const err = new Error(`خطأ في دالة ${node.name}: ${e.message}`);
+          err.start = node.start;
+          err.end = node.end;
+          throw err;
+        }
+      }
+
+      default:
+        throw new Error(`عقدة AST غير معروفة: ${node.type}`);
+    }
+  }
 
   /* ------------------------------------------------------------
    generate(ast, options)
@@ -419,17 +597,6 @@
       return entry.name;
     }
 
-    const opMap = {
-      '<': '<',
-      '>': '>',
-      '<=': '<=',
-      '>=': '>=',
-      '+': '+',
-      '-': '-',
-      '*': '*',
-      '/': '/'
-    };
-
     function registerHelper(name) {
       if (usedHelpers.has(name)) return;
       usedHelpers.add(name);
@@ -439,117 +606,14 @@
       }
     }
 
-    function gen(node, opts = {}) {
-      const needsMatrix = opts.needsMatrix === true;
-
-      switch (node.type) {
-        case 'Number':
-          return String(node.value);
-        case 'String':
-          return JSON.stringify(node.value);
-        case 'Boolean':
-          return node.value ? 'true' : 'false';
-        case 'CellRef':
-          return cellVar(node.name);
-
-        case 'Range': {
-          if (rangeParams) {
-            // الباراميتر يصل دائماً كمصفوفة ثنائية؛ السياق المسطّح يفرده
-            const name = rangeParamName(node.start, node.end);
-            return needsMatrix ? name : `${name}.flat(Infinity)`;
-          }
-          const { matrix } = expandRangeToMatrix(node.start, node.end);
-          if (needsMatrix) {
-            const rowStrs = matrix.map((row) => `[${row.join(', ')}]`);
-            return `[${rowStrs.join(', ')}]`;
-          }
-          return `[${matrix.flat().join(', ')}]`;
-        }
-
-        case 'Unary':
-          return `(${node.op}${gen(node.arg)})`;
-
-        case 'Percent':
-          return `((${gen(node.arg)}) / 100)`;
-
-        case 'Binary': {
-          const L = gen(node.left);
-          const R = gen(node.right);
-          // الخلية الفارغة نص فارغ في Excel — String(undefined) كان يعطي "undefined"
-          if (node.op === '&') {
-            registerHelper('_str');
-            return `(_str(${L}) + _str(${R}))`;
-          }
-          if (node.op === '^') return `Math.pow(${L}, ${R})`;
-          // = و <> بدلالات Excel: مقارنة النصوص غير حساسة لحالة الأحرف
-          if (node.op === '=') {
-            registerHelper('_eq');
-            return `_eq(${L}, ${R})`;
-          }
-          if (node.op === '<>') {
-            registerHelper('_eq');
-            return `(!_eq(${L}, ${R}))`;
-          }
-          return `(${L} ${opMap[node.op]} ${R})`;
-        }
-
-        case 'Call': {
-          const fn = FUNCTIONS[node.name];
-          if (!fn) {
-            const err = new Error(`الدالة "${node.name}" غير مدعومة في النسخة الحالية`);
-            err.start = node.start;
-            err.end = node.end;
-            err.unsupported = node.name;
-            throw err;
-          }
-
-          // فحص مركزي لعدد الوسائط حسب عقد الدالة (minArgs/maxArgs)
-          const argc = node.args.length;
-          const min = fn.minArgs ?? 0;
-          const max = fn.maxArgs ?? Infinity;
-          if (argc < min || argc > max) {
-            const expected =
-              min === max ? `${min}` : max === Infinity ? `${min}+` : `${min}–${max}`;
-            const err = new Error(`الدالة ${node.name} تتوقع ${expected} من الوسائط، وُجد ${argc}`);
-            err.start = node.start;
-            err.end = node.end;
-            throw err;
-          }
-
-          if (fn.usesHelpers) {
-            for (const h of fn.usesHelpers) registerHelper(h);
-          }
-
-          const matrixArgs = fn.matrixArgs || [];
-          const compiledArgs = node.args.map((a, idx) =>
-            gen(a, { needsMatrix: matrixArgs.includes(idx) })
-          );
-
-          // ملء الوسائط الاختيارية المحذوفة من عقد الدالة، فيستقبل الـ
-          // generator مصفوفة مكتملة بلا فحص `x !== undefined` في كل دالة
-          if (fn.defaults) {
-            for (const key of Object.keys(fn.defaults)) {
-              const idx = Number(key);
-              if (idx >= argc) compiledArgs[idx] = fn.defaults[key];
-            }
-          }
-
-          try {
-            return fn.generator(compiledArgs, ctx);
-          } catch (e) {
-            const err = new Error(`خطأ في دالة ${node.name}: ${e.message}`);
-            err.start = node.start;
-            err.end = node.end;
-            throw err;
-          }
-        }
-
-        default:
-          throw new Error(`عقدة AST غير معروفة: ${node.type}`);
-      }
-    }
-
-    const expr = gen(ast);
+    const expr = gen(ast, {
+      rangeParams,
+      cellVar,
+      expandRangeToMatrix,
+      rangeParamName,
+      registerHelper,
+      ctx
+    });
 
     // ترتيب topological للـ helpers (التبعيات تجي أولاً)
     const helperOrder = [];
@@ -585,6 +649,13 @@
     return a.localeCompare(b);
   }
 
+  // بيئة بلا window = Node (حزمة الاختبارات والـCI) → الفحص شغّال.
+  // في الصفحة يبقى مطفأً ما لم يُفعَّل صراحةً، فلا نحتاج 'unsafe-eval'.
+  function syntaxCheckEnabled() {
+    if (NS.SYNTAX_CHECK !== undefined) return !!NS.SYNTAX_CHECK;
+    return typeof window === 'undefined';
+  }
+
   /* ============================================================
    convertFormula — الواجهة الرئيسية
    ============================================================ */
@@ -614,17 +685,25 @@
       );
     }
 
-    // شبكة أمان: نتأكد أن التعبير المولّد صالح نحوياً قبل عرضه للمستخدم
-    // (new Function تُصرّف فقط ولا تنفّذ — الـ helpers غير المعرفة لا تضر)
-    try {
-      new Function(paramNames.join(', '), `return ${expr};`);
-    } catch (e) {
-      throw Object.assign(
-        new Error(
-          `خطأ داخلي: الكود المولّد غير صالح نحوياً (${e.message}). الرجاء الإبلاغ عن هذه الصيغة.`
-        ),
-        { start: 0, end: input.length }
-      );
+    // شبكة أمان: نتأكد أن التعبير المولّد صالح نحوياً قبل عرضه للمستخدم.
+    // ‏(new Function تُصرّف فقط ولا تنفّذ — الـ helpers غير المعرفة لا تضر)
+    //
+    // تعمل خارج المتصفح فقط: الحارس يلتقط أخطاء الـgenerator لا أخطاء
+    // المستخدم، أي إنه أداة تطوير. تشغيله في الصفحة كان يفرض
+    // 'unsafe-eval' في الـCSP — إضعاف دائم لأقوى بند فيها مقابل فحص
+    // تغطّيه حزمة الاختبارات في Node أصلاً. للتفعيل يدوياً:
+    // ‏ExcelToJS.SYNTAX_CHECK = true
+    if (syntaxCheckEnabled()) {
+      try {
+        new Function(paramNames.join(', '), `return ${expr};`);
+      } catch (e) {
+        throw Object.assign(
+          new Error(
+            `خطأ داخلي: الكود المولّد غير صالح نحوياً (${e.message}). الرجاء الإبلاغ عن هذه الصيغة.`
+          ),
+          { start: 0, end: input.length }
+        );
+      }
     }
 
     const lines = [];

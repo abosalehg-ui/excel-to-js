@@ -370,6 +370,16 @@ test('UI: CSP guard', 'hash السكربت المضمّن يطابق محتوا�
   assertEqual(/script-src[^;]*'unsafe-inline'/.test(csp), false, 'script-src بلا unsafe-inline');
 });
 
+test('UI: CSP guard', "script-src بلا 'unsafe-eval'", () => {
+  needsHtml();
+  // شبكة الأمان النحوية (new Function) صارت حارس تطوير مطفأً في
+  // المتصفح، فما عاد لـ'unsafe-eval' سبب. رجوعها للـCSP يعني إن أحداً
+  // أعاد تشغيل الحارس في الصفحة بدل حزمة الاختبارات.
+  const csp = INDEX_HTML.match(/http-equiv="Content-Security-Policy"[\s\S]*?content="([^"]+)"/)[1];
+  assertEqual(/'unsafe-eval'/.test(csp), false, "لا يصح رجوع 'unsafe-eval' للـCSP");
+  assertContains(csp, "default-src 'none'");
+});
+
 test('UI: CSS guard', 'ورقة طباعة تلغي قصّ كتلة الكود', () => {
   needsHtml();
   const block = INDEX_HTML.match(/@media print \{[\s\S]*?\n  \}/);
@@ -395,4 +405,111 @@ test('UI: CSS guard', 'المحاذاة المنطقية بدل الفيزيائ
     assertEqual(rule !== null, true, `قاعدة ${sel} غير موجودة`);
     assertContains(rule[0], 'text-align: start', sel);
   }
+});
+
+/* ------------------------------------------------------------
+   الجولة الثالثة (مِحَك 2026-08-22) — وصول وتغذية راجعة
+   ------------------------------------------------------------ */
+
+uiTest('الفشل الصامت يترك تلميحاً بدل لوحة فاضية', ({ doc, api }) => {
+  // كان طريقاً مسدوداً: لصق صيغة بدالة غير مدعومة يخفي كل شيء
+  doc.getElementById('formula-input').value = '=SUMIF(A1:A10,">0")';
+  api.doConvert({ silent: true });
+  const empty = doc.querySelector('#output-wrap .code-empty');
+  assertEqual(empty !== null, true, 'لازم يظهر نص بديل في لوحة المخرَج');
+  assertContains(empty.textContent, 'اضغط «تحويل»');
+});
+
+uiTest('التحويل الناجح يمسح تلميح الفشل', ({ doc, api }) => {
+  const $in = doc.getElementById('formula-input');
+  $in.value = '=SUMIF(A1:A10,">0")';
+  api.doConvert({ silent: true });
+  $in.value = '=SUM(A1:A3)';
+  api.doConvert();
+  assertEqual(doc.querySelector('#output-wrap .code-empty'), null);
+  assertContains(doc.querySelector('.code-content').textContent, 'function calculate');
+});
+
+uiTest('الخطأ يعلَّم على الحقل نفسه بـaria-invalid', ({ doc, api }) => {
+  // التعليم البصري (.err-mark) مرئي بحت — قارئ الشاشة ما كان يعرف شيئاً
+  const $in = doc.getElementById('formula-input');
+  $in.value = '=XYZ(A1)';
+  api.doConvert();
+  assertEqual($in.getAttribute('aria-invalid'), 'true');
+  assertEqual($in.getAttribute('aria-describedby'), 'status');
+  // ورسالة الخطأ فعلاً في العنصر المُشار إليه
+  assertContains(doc.getElementById('status').textContent, 'غير مدعومة');
+});
+
+uiTest('النجاح ينزع aria-invalid عن الحقل', ({ doc, api }) => {
+  const $in = doc.getElementById('formula-input');
+  $in.value = '=XYZ(A1)';
+  api.doConvert();
+  $in.value = '=SUM(A1:A3)';
+  api.doConvert();
+  assertEqual($in.hasAttribute('aria-invalid'), false);
+  assertEqual($in.hasAttribute('aria-describedby'), false);
+});
+
+uiTest('حاويات التمرير قابلة للوصول بلوحة المفاتيح', ({ doc }) => {
+  // WCAG 2.1.1: محتوى يمرّر بلا وسيلة تمرير من لوحة المفاتيح = محتوى مفقود
+  for (const sel of ['#output-wrap', '.ref-table-wrap']) {
+    const node = doc.querySelector(sel);
+    assertEqual(node.getAttribute('tabindex'), '0', `${sel} لازم يستقبل التركيز`);
+    assertEqual(node.getAttribute('role'), 'region');
+    assertEqual(!!node.getAttribute('aria-label'), true, `${sel} يحتاج اسماً`);
+  }
+});
+
+uiTest('توقيع بباراميترات كثيرة يقترح وضع النطاقات', ({ doc, api }) => {
+  doc.getElementById('formula-input').value = '=SUM(A1:A20)';
+  api.doConvert();
+  const info = doc.getElementById('output-info').textContent;
+  assertContains(info, 'النطاقات كمصفوفات');
+});
+
+uiTest('التوقيع القصير بلا اقتراح', ({ doc, api }) => {
+  doc.getElementById('formula-input').value = '=A1+B1';
+  api.doConvert();
+  assertEqual(doc.querySelector('#output-info .info-nudge'), null);
+});
+
+uiTest('الاقتراح يختفي حين يكون وضع النطاقات مفعّلاً', ({ doc, api }) => {
+  doc.getElementById('range-mode').checked = true;
+  doc.getElementById('formula-input').value = '=SUM(A1:A20)';
+  api.doConvert();
+  assertEqual(doc.querySelector('#output-info .info-nudge'), null);
+});
+
+uiTest('كل صف في الجدول المرجعي يحمل وصفه لعرض الجوال', ({ doc }) => {
+  // على الجوال يُخفى عمود الوصف ويُعرض من data-desc عبر ::after
+  const rows = doc.querySelectorAll('#ref-table-body tr');
+  assertEqual(rows.length, Object.keys(FUNCTIONS).length);
+  for (const tr of rows) {
+    const cell = tr.children[1];
+    const name = cell.textContent.trim();
+    assertEqual(cell.dataset.desc, FUNCTIONS[name].desc, `${name}: data-desc ناقص`);
+  }
+});
+
+uiTest('الأمثلة السريعة كلها تتحوّل بلا خطأ', ({ doc, api }) => {
+  // EXAMPLES صارت بيانات على مستوى الوحدة — نتأكد إنها ما زالت صالحة
+  for (const ex of NS.EXAMPLES) {
+    doc.getElementById('formula-input').value = ex.formula;
+    api.doConvert();
+    assertEqual(
+      doc.getElementById('formula-input').hasAttribute('aria-invalid'),
+      false,
+      `المثال "${ex.label}" فشل: ${ex.formula}`
+    );
+  }
+});
+
+test('UI: CSS guard', 'وضع التباين العالي يخفي طبقة التلوين', () => {
+  needsHtml();
+  // النص الشفاف فوق طبقة تلوين يعطي نصّين متراكبين حين يفرض النظام الألوان
+  assertContains(INDEX_HTML, '@media (forced-colors: active)');
+  const block = INDEX_HTML.match(/@media \(forced-colors: active\) \{([\s\S]*?)\n  \}/)[1];
+  assertContains(block, '.editor-highlight { display: none; }');
+  assertContains(block, 'CanvasText');
 });

@@ -27,3 +27,7 @@ jobs:
         run: node tests/run-node.js
         env:
           TZ: America/New_York
+      # عتبات التغطية في .c8rc.json — الفجوات كانت تُكشف بالقراءة اليدوية
+      # وحدها، وثلاثة أخطاء صامتة عاشت في فروع غير مغطّاة حتى مراجعة مِحَك
+      - name: Check coverage thresholds
+        run: npm run coverage

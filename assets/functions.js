@@ -233,12 +233,15 @@
     },
     TRIM: {
       cat: 'text',
-      desc: 'إزالة المسافات الزائدة',
-      jsEquiv: 'str.trim()',
+      desc: 'إزالة المسافات الزائدة (الأطراف + طيّ المسافات الداخلية)',
+      jsEquiv: "str.replace(/\\s+/g,' ').trim()",
       minArgs: 1,
       maxArgs: 1,
       usesHelpers: ['_str'],
-      generator: (args) => `_str(${args[0]}).trim()`
+      // ‏TRIM في Excel تطوي كل تتابع مسافات داخلي لمسافة واحدة — وهذا
+      // غرضها الأساسي (تنظيف بيانات ملصوقة). ‏String.trim تحذف الأطراف
+      // فقط، فـ" a   b " كانت تخرج "a   b" بدل "a b".
+      generator: (args) => `_str(${args[0]}).replace(/\\s+/g, ' ').trim()`
     },
     UPPER: {
       cat: 'text',
@@ -267,10 +270,18 @@
       usesHelpers: ['_str'],
       generator: (args, ctx) => {
         const [str, start, num, newStr] = args;
-        return ctx.once(`_str(${str})`, (s) =>
-          ctx.once(
-            `(${start}) - 1`,
-            (i) => `(${s}.slice(0, ${i}) + _str(${newStr}) + ${s}.slice(${i} + (${num})))`
+        // Excel: REPLACE ترجّع #VALUE! لو البداية < 1 أو عدد الأحرف < 0.
+        // بلا الحارس يدخل السالب إلى slice بدلالة "من النهاية" في JS،
+        // فـREPLACE("HELLO",-3,2,"X") كانت تعطي "HXLO" و0 تعطي تكراراً.
+        return ctx.once(start, (st) =>
+          ctx.once(num, (n) =>
+            ctx.once(`_str(${str})`, (s) =>
+              ctx.once(
+                `(${st}) - 1`,
+                (i) =>
+                  `(${st} < 1 || ${n} < 0 ? '#VALUE!' : ${s}.slice(0, ${i}) + _str(${newStr}) + ${s}.slice(${i} + (${n})))`
+              )
+            )
           )
         );
       }
