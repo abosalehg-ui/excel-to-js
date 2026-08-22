@@ -363,15 +363,23 @@
     return s;
   };
 
+  // ما تبقى من العوامل الخام — المقارنات الترتيبية فقط؛ الحسابية كلها
+  // تمرّ عبر helpers بدلالات Excel (انظر ARITH_HELPERS)
   const opMap = {
     '<': '<',
     '>': '>',
     '<=': '<=',
-    '>=': '>=',
-    '+': '+',
-    '-': '-',
-    '*': '*',
-    '/': '/'
+    '>=': '>='
+  };
+
+  // العوامل الحسابية → الـhelper المكافئ. كلها مبنية على _num:
+  // الفراغ صفر، غير الرقمي #VALUE! — لا دمج نصّي ولا NaN صامتة
+  const ARITH_HELPERS = {
+    '+': '_add',
+    '-': '_sub',
+    '*': '_mul',
+    '/': '_div',
+    '^': '_pow'
   };
 
   /* ------------------------------------------------------------
@@ -412,10 +420,18 @@
       }
 
       case 'Unary':
-        return `(${node.op}${gen(node.arg, state)})`;
+        // السالب الأحادي حسابي كذلك: ‏-فراغ = 0 في Excel لا NaN.
+        // الموجب الأحادي في Excel محايد تماماً (يُرجع القيمة كما هي حتى
+        // لو نصاً)، بينما ‎+x‎ في JS كان يقسرها رقماً
+        if (node.op === '-') {
+          state.registerHelper('_neg');
+          return `_neg(${gen(node.arg, state)})`;
+        }
+        return `(${gen(node.arg, state)})`;
 
       case 'Percent':
-        return `((${gen(node.arg, state)}) / 100)`;
+        state.registerHelper('_div');
+        return `_div(${gen(node.arg, state)}, 100)`;
 
       case 'Binary': {
         const L = gen(node.left, state);
@@ -425,13 +441,13 @@
           state.registerHelper('_str');
           return `(_str(${L}) + _str(${R}))`;
         }
-        // ‏'+' في Excel عملية حسابية دائماً، بينما '+' في JS يدمج
-        // النصوص لو أحد الطرفين نص — "5"+"3" كان يعطي "53" لا 8
-        if (node.op === '+') {
-          state.registerHelper('_add');
-          return `_add(${L}, ${R})`;
+        // العوامل الحسابية في Excel عمليات حسابية دائماً — "5"+"3" في JS
+        // كان يعطي "53"، و=A1-A2 على فراغين NaN بينما =A1+A2 عليهما 0
+        if (ARITH_HELPERS[node.op]) {
+          const h = ARITH_HELPERS[node.op];
+          state.registerHelper(h);
+          return `${h}(${L}, ${R})`;
         }
-        if (node.op === '^') return `Math.pow(${L}, ${R})`;
         // = و <> بدلالات Excel: مقارنة النصوص غير حساسة لحالة الأحرف
         if (node.op === '=') {
           state.registerHelper('_eq');

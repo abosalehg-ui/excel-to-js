@@ -248,7 +248,9 @@
       clear($output);
       if (!code) {
         $output.appendChild(el('div', 'code-empty', hint || 'سيظهر الكود هنا بعد التحويل…'));
-        $outputInfo.style.display = 'none';
+        // hidden لا style.display: وسم style مضمّن في الـHTML كان يفرض
+        // 'unsafe-inline' في style-src، والسمة تؤدي نفس الغرض بلا ذلك
+        $outputInfo.hidden = true;
         return;
       }
       const block = el('div', 'code-block');
@@ -297,7 +299,7 @@
           )
         );
       }
-      $outputInfo.style.display = 'flex';
+      $outputInfo.hidden = false;
     }
 
     /* ----- شريط الحالة ----- */

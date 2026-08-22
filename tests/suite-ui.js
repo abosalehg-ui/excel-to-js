@@ -370,6 +370,28 @@ test('UI: CSP guard', 'hash السكربت المضمّن يطابق محتوا�
   assertEqual(/script-src[^;]*'unsafe-inline'/.test(csp), false, 'script-src بلا unsafe-inline');
 });
 
+test('UI: CSP guard', 'hash كتلة <style> يطابق محتواها فعلياً', () => {
+  needsHtml();
+  if (!crypto) skip('يحتاج وحدة crypto');
+  // style-src بلا 'unsafe-inline' الآن: كتلة الأنماط مسموحة بـhash،
+  // فأي تعديل CSS بلا إعادة حساب الـhash يترك الصفحة بلا أنماط كلياً
+  const body = INDEX_HTML.match(/<style>([\s\S]*?)<\/style>/)[1];
+  const digest = 'sha256-' + crypto.createHash('sha256').update(body, 'utf8').digest('base64');
+  const csp = INDEX_HTML.match(/http-equiv="Content-Security-Policy"[\s\S]*?content="([^"]+)"/)[1];
+  const styleSrc = csp.match(/style-src[^;]*/)[0];
+  const declared = styleSrc.match(/'(sha256-[^']+)'/)[1];
+  assertEqual(digest, declared, 'أعد حساب hash كتلة <style> بعد تعديل الأنماط');
+  assertEqual(/'unsafe-inline'/.test(styleSrc), false, "style-src بلا 'unsafe-inline'");
+});
+
+test('UI: CSP guard', 'لا سمات style مضمّنة في الصفحة', () => {
+  needsHtml();
+  // سمة style واحدة في الـHTML تكفي لإعادة 'unsafe-inline' —
+  // الإخفاء بسمة hidden والأنماط في كتلة <style> المحمية بـhash
+  assertEqual(/<[a-z][^>]*\sstyle="/i.test(INDEX_HTML), false, 'استخدم صنفاً أو hidden بدلها');
+  assertContains(INDEX_HTML, 'id="output-info" hidden');
+});
+
 test('UI: CSP guard', "script-src بلا 'unsafe-eval'", () => {
   needsHtml();
   // شبكة الأمان النحوية (new Function) صارت حارس تطوير مطفأً في

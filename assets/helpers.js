@@ -16,24 +16,79 @@
 }`
     },
 
-    // _add: جمع بدلالات Excel — عملية حسابية دائماً، لا دمج نصّي.
-    // ‏JS: "5" + "3" = "53"، بينما Excel: =A1+A2 على النصّين = 8.
+    // _num: تطبيع رقمي بدلالات Excel — أساس العوامل الحسابية كلها.
     // الخلية الفارغة (null/undefined/"") صفر كما في Excel، وما لا يقبل
     // التحويل رقماً يعطي ‎#VALUE!‎ لا NaN صامتاً.
-    _add: {
-      code: `function _add(a, b) {
-  const blank = (v) => v === null || v === undefined || v === '';
-  const x = blank(a) ? 0 : Number(a);
-  const y = blank(b) ? 0 : Number(b);
-  if (isNaN(x) || isNaN(y)) return '#VALUE!';
-  return x + y;
+    _num: {
+      code: `function _num(v) {
+  if (v === null || v === undefined || v === '') return 0;
+  const n = Number(v);
+  return isNaN(n) ? '#VALUE!' : n;
 }`
     },
 
-    // _toDate: توحيد قبول التاريخ — Date كما هي، وأي شيء آخر يمرّ على new Date
+    // العوامل الحسابية (+ - * / ^ والسالب الأحادي): عملية حسابية دائماً
+    // كما في Excel، لا دلالات JS. ‏"5" + "3" في JS دمج نصّي = "53"،
+    // والفراغ في '-' و'*' كان يعطي NaN صامتة. كانت '+' وحدها مصلحة في
+    // 3.1.4 والبقية بدلالات JS — سلوك متناقض داخل الأداة نفسها.
+    // ‏#VALUE! من أي طرف يمرّ عبر العملية بدل أن ينقلب NaN.
+    _add: {
+      deps: ['_num'],
+      code: `function _add(a, b) {
+  const x = _num(a), y = _num(b);
+  return x === '#VALUE!' || y === '#VALUE!' ? '#VALUE!' : x + y;
+}`
+    },
+    _sub: {
+      deps: ['_num'],
+      code: `function _sub(a, b) {
+  const x = _num(a), y = _num(b);
+  return x === '#VALUE!' || y === '#VALUE!' ? '#VALUE!' : x - y;
+}`
+    },
+    _mul: {
+      deps: ['_num'],
+      code: `function _mul(a, b) {
+  const x = _num(a), y = _num(b);
+  return x === '#VALUE!' || y === '#VALUE!' ? '#VALUE!' : x * y;
+}`
+    },
+    // القسمة على صفر تبقى Infinity (وNaN لـ 0/0) — انحراف موثق مقصود،
+    // تلتقطه IFERROR/ISERROR كما في بقية الأداة
+    _div: {
+      deps: ['_num'],
+      code: `function _div(a, b) {
+  const x = _num(a), y = _num(b);
+  return x === '#VALUE!' || y === '#VALUE!' ? '#VALUE!' : x / y;
+}`
+    },
+    _pow: {
+      deps: ['_num'],
+      code: `function _pow(a, b) {
+  const x = _num(a), y = _num(b);
+  return x === '#VALUE!' || y === '#VALUE!' ? '#VALUE!' : Math.pow(x, y);
+}`
+    },
+    _neg: {
+      deps: ['_num'],
+      code: `function _neg(a) {
+  const x = _num(a);
+  return x === '#VALUE!' ? '#VALUE!' : -x;
+}`
+    },
+
+    // _toDate: توحيد قبول التاريخ — Date كما هي. صيغة التاريخ-فقط
+    // "YYYY-MM-DD" تُبنى يدوياً بالتوقيت المحلي: تمريرها لـnew Date
+    // يفسّرها منتصف ليل UTC فتنزاح يوماً كاملاً في المناطق غرب غرينتش
+    // (YEAR("2024-01-01") كانت ترجع 2023 بتوقيت نيويورك).
     _toDate: {
       code: `function _toDate(v) {
-  return v instanceof Date ? v : new Date(v);
+  if (v instanceof Date) return v;
+  if (typeof v === 'string') {
+    const m = /^\\s*(\\d{4})-(\\d{2})-(\\d{2})\\s*$/.exec(v);
+    if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  }
+  return new Date(v);
 }`
     },
 
