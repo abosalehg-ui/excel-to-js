@@ -285,9 +285,11 @@ test('Generator', '& → دمج نصي عبر _str', () => {
   assertEqual(r.usedHelpers.includes('_str'), true);
 });
 
-test('Generator', '^ → Math.pow', () => {
+test('Generator', '^ → _pow (بدلالات Excel لا Math.pow الخام)', () => {
   const r = generate(parse(tokenize('A1^2')));
-  assertContains(r.expr, 'Math.pow(a1, 2)');
+  assertContains(r.expr, '_pow(a1, 2)');
+  assertEqual(r.usedHelpers.includes('_pow'), true);
+  assertEqual(r.usedHelpers.includes('_num'), true);
 });
 
 test('Generator', 'usedCells مرتّبة natural sort: a1,a2,a10', () => {
@@ -686,6 +688,37 @@ test('Runtime: Date', 'DATEDIF بوحدات YM / MD', () => {
   assertEqual(runFormula('=DATEDIF(DATE(2020,1,15), DATE(2026,4,20), "MD")', {}), 5);
 });
 
+/* ------------------------------------------------------------
+   تواريخ نصية "YYYY-MM-DD" — القيم من JSON/CSV/<input> تصل نصوصاً.
+   ‏new Date("2024-01-01") يفسّرها منتصف ليل UTC، فكانت YEAR ترجع
+   2023 وDAY ترجع اليوم السابق في المناطق غرب غرينتش. تشغيلة
+   ‏TZ=America/New_York في الـCI هي الحارس الفعلي لهذه الحزمة —
+   الاختبارات بكائنات Date وحدها كانت عمياء عن الخلل.
+   ------------------------------------------------------------ */
+test('Runtime: Date', 'YEAR/MONTH/DAY على تاريخ نصي لا تنزاح مع المنطقة الزمنية', () => {
+  assertEqual(runFormula('=YEAR(A1)', { a1: '2024-01-01' }), 2024);
+  assertEqual(runFormula('=MONTH(A1)', { a1: '2024-01-01' }), 1);
+  assertEqual(runFormula('=DAY(A1)', { a1: '2024-01-01' }), 1);
+  // عبور حد التوقيت الصيفي الأمريكي (آذار)
+  assertEqual(runFormula('=DAY(A1)', { a1: '2024-03-10' }), 10);
+  assertEqual(runFormula('=DAY(A1)', { a1: '2024-12-31' }), 31);
+});
+
+test('Runtime: Date', 'DATEDIF وEDATE على تواريخ نصية', () => {
+  assertEqual(runFormula('=DATEDIF(A1,B1,"D")', { a1: '2024-03-01', b1: '2024-03-10' }), 9);
+  assertEqual(runFormula('=DATEDIF(A1,B1,"M")', { a1: '2024-01-15', b1: '2024-06-20' }), 5);
+  assertEqual(runFormula('=YEAR(EDATE(A1,12))', { a1: '2024-01-31' }), 2025);
+  assertEqual(runFormula('=DAY(EDATE(A1,1))', { a1: '2024-01-31' }), 29);
+});
+
+test('Runtime: Date', 'التاريخ النصي يقبل فراغات طرفية وغير ذلك يمرّ على new Date', () => {
+  assertEqual(runFormula('=DAY(A1)', { a1: ' 2024-05-06 ' }), 6);
+  // صيغة كاملة بوقت — تُترك لـnew Date كما كانت
+  const d = runFormula('=DAY(A1)', { a1: '2024-05-06T12:00:00' }),
+    ok = d === 6;
+  assertEqual(ok, true, 'صيغة ISO بوقت محلي تبقى صحيحة');
+});
+
 // === Check ===
 test('Runtime: Check', 'ISBLANK', () => {
   assertEqual(runFormula('=ISBLANK(A1)', { a1: '' }), true);
@@ -1059,6 +1092,58 @@ test('Excel Semantics', '+ يبقي الحساب العادي والأولويا
   assertEqual(runFormula('=(2+3)*4', {}), 20);
   assertEqual(runFormula('=A1+A2', { a1: 1.5, a2: 2.25 }), 3.75);
   assertEqual(runFormula('=A1+A2', { a1: true, a2: 1 }), 2);
+});
+
+/* ------------------------------------------------------------
+   اتساق العوامل الحسابية — 3.1.4 أصلحت '+' وحدها فصار
+   ‏=A1+A2 على فراغين 0 بينما =A1-A2 عليهما NaN. كل العوامل
+   (- * / ^ والسالب الأحادي) صارت على نفس عقد _num.
+   ------------------------------------------------------------ */
+test('Excel Semantics', '- و * و / و ^ تعامل الفراغ صفراً مثل +', () => {
+  assertEqual(runFormula('=A1-A2', {}), 0);
+  assertEqual(runFormula('=A1-A2', { a1: null, a2: 5 }), -5);
+  assertEqual(runFormula('=A1*2', { a1: '' }), 0);
+  assertEqual(runFormula('=A1^2', {}), 0);
+  assertEqual(runFormula('=A1/4', {}), 0);
+});
+
+test('Excel Semantics', '- و * و / و ^ تعطي #VALUE! لنص غير رقمي مثل +', () => {
+  assertEqual(runFormula('=A1-A2', { a1: 'نص', a2: 5 }), '#VALUE!');
+  assertEqual(runFormula('=A1*2', { a1: 'نص' }), '#VALUE!');
+  assertEqual(runFormula('=A1/A2', { a1: 10, a2: 'abc' }), '#VALUE!');
+  assertEqual(runFormula('=A1^2', { a1: 'نص' }), '#VALUE!');
+  // ‏#VALUE! من طرف يمرّ عبر بقية السلسلة بدل أن ينقلب NaN
+  assertEqual(runFormula('=(A1*2)+1', { a1: 'نص' }), '#VALUE!');
+});
+
+test('Excel Semantics', 'العوامل تقسر النص الرقمي مثل +', () => {
+  assertEqual(runFormula('=A1-A2', { a1: '10', a2: '3' }), 7);
+  assertEqual(runFormula('=A1*A2', { a1: '5', a2: '3' }), 15);
+  assertEqual(runFormula('=A1/A2', { a1: '10', a2: '4' }), 2.5);
+  assertEqual(runFormula('=A1^A2', { a1: '2', a2: '10' }), 1024);
+});
+
+test('Excel Semantics', 'السالب الأحادي حسابي والموجب الأحادي محايد', () => {
+  // Excel: ‏-فراغ = 0، -"5" = -5، -"نص" = #VALUE!
+  assertEqual(runFormula('=-A1', {}), 0);
+  assertEqual(runFormula('=-A1', { a1: '5' }), -5);
+  assertEqual(runFormula('=-A1', { a1: 'نص' }), '#VALUE!');
+  assertEqual(runFormula('=--A1', { a1: 3 }), 3);
+  // ‏=+A1 في Excel يُرجع القيمة كما هي حتى لو نصاً (لا قسر رقمي)
+  assertEqual(runFormula('=+A1', { a1: 'نص' }), 'نص');
+  assertEqual(runFormula('=+A1', { a1: 7 }), 7);
+});
+
+test('Excel Semantics', 'لاحقة % على نفس عقد العوامل', () => {
+  assertEqual(runFormula('=A1%', { a1: 50 }), 0.5);
+  assertEqual(runFormula('=A1%', { a1: '50' }), 0.5);
+  assertEqual(runFormula('=A1%', {}), 0);
+  assertEqual(runFormula('=A1%', { a1: 'نص' }), '#VALUE!');
+});
+
+test('Excel Semantics', 'القسمة على صفر تبقى Infinity (انحراف موثق)', () => {
+  assertEqual(runFormula('=A1/A2', { a1: 5, a2: 0 }), Infinity);
+  assertEqual(runFormula('=ISERROR(A1/A2)', { a1: 5, a2: 0 }), true);
 });
 
 test('Excel Semantics', 'TRIM تطوي المسافات الداخلية', () => {

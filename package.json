@@ -1,6 +1,6 @@
 {
   "name": "excel-to-js",
-  "version": "3.1.4",
+  "version": "3.1.5",
   "description": "محوّل صيغ Excel إلى JavaScript — أداة محلية بالكامل تعمل بدون إنترنت",
   "license": "MIT",
   "private": true,
