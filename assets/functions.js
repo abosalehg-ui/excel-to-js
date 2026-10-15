@@ -9,6 +9,8 @@
      - usesHelpers: قائمة helpers يحتاجها هذا التوليد
      - matrixArgs:  أرقام الوسائط اللي لازم تتولّد كـ 2D matrix
                     (مثلاً VLOOKUP يبغى الجدول كـ matrix لا flat)
+     - validate:    (عقد AST للوسائط, dims) → رسالة خطأ أو null — فحص
+                    وقت التحويل لما يُعرف من الصيغة نفسها
      - defaults:    { رقم الوسيط: كود الافتراضي } — يملأها engine.js
                     مركزياً قبل استدعاء الـ generator، فيستقبل الـ
                     generator دائماً مصفوفة وسائط مكتملة بلا فحص
@@ -24,6 +26,20 @@
     if (exact === 'true') return 'false';
     if (exact === 'false') return 'true';
     return ctx.once(exact, (e) => `(${e} === false || ${e} === 0)`);
+  };
+
+  // فحص وقت التحويل لرقم العمود/الصف في VLOOKUP/HLOOKUP: لو كان حرفياً
+  // والجدول نطاقاً معروف الأبعاد، فالخطأ معروف قبل التشغيل ولا داعي
+  // لتوليد كود يرجّع #REF! دائماً. غير ذلك يبقى الفحص في الـhelper.
+  const indexArgCheck = (nodes, dims, axis, label) => {
+    const [, table, idx] = nodes;
+    if (!table || table.type !== 'Range' || !idx || idx.type !== 'Number') return null;
+    const size = dims(table)[axis];
+    if (idx.value < 1) return `رقم ${label} (${idx.value}) أصغر من 1`;
+    if (idx.value > size) {
+      return `رقم ${label} (${idx.value}) أكبر من حجم الجدول (${size}) — النتيجة ستكون #REF! دائماً`;
+    }
+    return null;
   };
 
   const FUNCTIONS = {
@@ -46,7 +62,12 @@
       jsEquiv: 'arr.every(Boolean)',
       minArgs: 1,
       maxArgs: Infinity,
-      generator: (args) => `[${args.join(', ')}].flat(Infinity).every(v => Boolean(v))`
+      // الفراغ داخل النطاق يُتجاهل كما في Excel، ولا قيمة إطلاقاً = #VALUE!
+      generator: (args, ctx) =>
+        ctx.once(
+          `[${args.join(', ')}].flat(Infinity).filter(v => v !== null && v !== undefined)`,
+          (a) => `(${a}.length ? ${a}.every(v => Boolean(v)) : '#VALUE!')`
+        )
     },
     OR: {
       cat: 'logic',
@@ -54,7 +75,11 @@
       jsEquiv: 'arr.some(Boolean)',
       minArgs: 1,
       maxArgs: Infinity,
-      generator: (args) => `[${args.join(', ')}].flat(Infinity).some(v => Boolean(v))`
+      generator: (args, ctx) =>
+        ctx.once(
+          `[${args.join(', ')}].flat(Infinity).filter(v => v !== null && v !== undefined)`,
+          (a) => `(${a}.length ? ${a}.some(v => Boolean(v)) : '#VALUE!')`
+        )
     },
     NOT: {
       cat: 'logic',
@@ -81,10 +106,11 @@
     SUM: {
       cat: 'math',
       desc: 'مجموع الأرقام',
-      jsEquiv: 'arr.reduce((a,b)=>a+b,0)',
+      jsEquiv: '_sum(arr)',
       minArgs: 1,
       maxArgs: Infinity,
-      generator: (args) => `[${args.join(', ')}].flat(Infinity).reduce((a,b)=>a+(Number(b)||0),0)`
+      usesHelpers: ['_sum'],
+      generator: (args) => `_sum([${args.join(', ')}])`
     },
     AVERAGE: {
       cat: 'math',
@@ -134,7 +160,8 @@
       jsEquiv: 'Math.abs(n)',
       minArgs: 1,
       maxArgs: 1,
-      generator: (args) => `Math.abs(${args[0]})`
+      usesHelpers: ['_abs'],
+      generator: (args) => `_abs(${args[0]})`
     },
     POWER: {
       cat: 'math',
@@ -142,7 +169,9 @@
       jsEquiv: 'Math.pow(a, b)',
       minArgs: 2,
       maxArgs: 2,
-      generator: (args) => `Math.pow(${args[0]}, ${args[1]})`
+      // نفس helper العامل ^ — فـPOWER(A1,2) و=A1^2 يتطابقان على الفراغ
+      usesHelpers: ['_pow'],
+      generator: (args) => `_pow(${args[0]}, ${args[1]})`
     },
     SQRT: {
       cat: 'math',
@@ -150,7 +179,8 @@
       jsEquiv: 'Math.sqrt(n)',
       minArgs: 1,
       maxArgs: 1,
-      generator: (args) => `Math.sqrt(${args[0]})`
+      usesHelpers: ['_sqrt'],
+      generator: (args) => `_sqrt(${args[0]})`
     },
     MOD: {
       cat: 'math',
@@ -238,9 +268,8 @@
       minArgs: 1,
       maxArgs: 1,
       usesHelpers: ['_str'],
-      // ‏TRIM في Excel تطوي كل تتابع مسافات داخلي لمسافة واحدة — وهذا
-      // غرضها الأساسي (تنظيف بيانات ملصوقة). ‏String.trim تحذف الأطراف
-      // فقط، فـ" a   b " كانت تخرج "a   b" بدل "a b".
+      // ‏TRIM في Excel تطوي كل تتابع مسافات داخلي لمسافة واحدة، لا
+      // الأطراف فقط كما تفعل String.trim
       generator: (args) => `_str(${args[0]}).replace(/\\s+/g, ' ').trim()`
     },
     UPPER: {
@@ -270,9 +299,8 @@
       usesHelpers: ['_str'],
       generator: (args, ctx) => {
         const [str, start, num, newStr] = args;
-        // Excel: REPLACE ترجّع #VALUE! لو البداية < 1 أو عدد الأحرف < 0.
-        // بلا الحارس يدخل السالب إلى slice بدلالة "من النهاية" في JS،
-        // فـREPLACE("HELLO",-3,2,"X") كانت تعطي "HXLO" و0 تعطي تكراراً.
+        // Excel: REPLACE ترجّع #VALUE! لو البداية < 1 أو عدد الأحرف < 0؛
+        // بلا الحارس يدخل السالب إلى slice بدلالة "من النهاية" في JS
         return ctx.once(start, (st) =>
           ctx.once(num, (n) =>
             ctx.once(`_str(${str})`, (s) =>
@@ -351,6 +379,7 @@
       usesHelpers: ['_vlookup'],
       matrixArgs: [1],
       defaults: { 3: 'true' },
+      validate: (nodes, dims) => indexArgCheck(nodes, dims, 'cols', 'العمود'),
       generator: (args, ctx) => {
         const [val, table, col, exact] = args;
         return `_vlookup(${val}, ${table}, ${col}, ${exactArg(ctx, exact)})`;
@@ -365,6 +394,7 @@
       usesHelpers: ['_hlookup'],
       matrixArgs: [1],
       defaults: { 3: 'true' },
+      validate: (nodes, dims) => indexArgCheck(nodes, dims, 'rows', 'الصف'),
       generator: (args, ctx) => {
         const [val, table, row, exact] = args;
         return `_hlookup(${val}, ${table}, ${row}, ${exactArg(ctx, exact)})`;

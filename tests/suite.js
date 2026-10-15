@@ -862,7 +862,7 @@ test('Limits', 'نطاق واحد فوق الحد يُرفض', () => {
    ========================================================= */
 test('once', 'ISBLANK لا تكرر وسيطها', () => {
   const r = generate(parse(tokenize('ISBLANK(SUM(A1:A5))')));
-  const inner = '[[a1, a2, a3, a4, a5]].flat(Infinity)';
+  const inner = '_sum([[a1, a2, a3, a4, a5]])';
   assertEqual(r.expr.split(inner).length - 1, 1, 'يجب أن يظهر تعبير SUM مرة واحدة فقط');
 });
 
@@ -1222,8 +1222,9 @@ test('Limits', 'خطأ سلسلة المعاملات يحمل موضعاً قا�
 test('Limits', 'الفحص النحوي حارس تطوير: شغّال في Node ومطفأ في الصفحة', () => {
   // ثمنه في المتصفح كان 'unsafe-eval' في الـCSP، وفائدته التقاط أخطاء
   // الـgenerator — وهي مهمة حزمة الاختبارات لا مهمة صفحة المستخدم.
+  // الاختبار يخص Node — في tests.html الحارس مطفأ عمداً فيُتخطّى لا يفشل
+  if (typeof window !== 'undefined') skip('يخص بيئة Node (الحارس مطفأ في المتصفح)');
   const NS = globalThis.ExcelToJS;
-  assertEqual(typeof window === 'undefined', true, 'حزمة Node تشتغل بلا window');
   // الافتراضي في Node: شغّال — فصيغة سليمة تمرّ وأي كسر نحوي يُلتقط
   assertEqual(NS.SYNTAX_CHECK, undefined, 'ما فيه تجاوز صريح');
   assertContains(convertFormula('=A1+1').code, '_add(a1, 1)');
@@ -1235,4 +1236,160 @@ test('Limits', 'الفحص النحوي حارس تطوير: شغّال في Nod
   } finally {
     delete NS.SYNTAX_CHECK;
   }
+});
+
+/* =========================================================
+   Blank semantics — الخلية الفارغة في المقارنة والشروط
+   ---------------------------------------------------------
+   ‏=A1="" هو أشهر فحص فراغ في Excel، وكان يرجع FALSE على خلية
+   فارغة لأن _eq تقارن undefined === "" حرفياً
+   ========================================================= */
+test('Blank semantics', '=A1="" على خلية فارغة → TRUE', () => {
+  assertEqual(runFormula('=IF(A1="","فارغ","ممتلئ")', {}), 'فارغ');
+  assertEqual(runFormula('=IF(A1="","فارغ","ممتلئ")', { a1: null }), 'فارغ');
+  assertEqual(runFormula('=IF(A1="","فارغ","ممتلئ")', { a1: 'x' }), 'ممتلئ');
+  assertEqual(runFormula('=A1<>""', {}), false);
+});
+
+test('Blank semantics', '=A1=0 و=A1=FALSE على خلية فارغة → TRUE', () => {
+  assertEqual(runFormula('=A1=0', {}), true);
+  assertEqual(runFormula('=A1=FALSE', {}), true);
+  assertEqual(runFormula('=A1=B1', {}), true, 'فراغ = فراغ');
+  // ‏"" النصية تبقى نصاً: "" ≠ 0 كما في Excel
+  assertEqual(runFormula('=A1=0', { a1: 'x' }), false);
+});
+
+test('Blank semantics', 'COUNTIF بـ"" و"<>" و"=" على الفراغات', () => {
+  const v = { a1: 1, a2: undefined, a3: 'x' };
+  assertEqual(runFormula('=COUNTIF(A1:A3,"")', v), 1);
+  assertEqual(runFormula('=COUNTIF(A1:A3,"=")', v), 1);
+  assertEqual(runFormula('=COUNTIF(A1:A3,"<>")', v), 2);
+  assertEqual(runFormula('=COUNTIF(A1:A3,"<>")', {}), 0);
+  // المعيار الرقمي لا يطابق الفراغ، و"<>رقم" يقبله
+  assertEqual(runFormula('=COUNTIF(A1:A3,0)', {}), 0);
+  assertEqual(runFormula('=COUNTIF(A1:A3,">-1")', {}), 0);
+  assertEqual(runFormula('=COUNTIF(A1:A3,"<>5")', {}), 3);
+});
+
+test('Blank semantics', 'COUNTIFS يعامل الفراغ بنفس القواعد', () => {
+  const v = { a1: 1, a2: 2, b1: 'نعم' };
+  assertEqual(runFormula('=COUNTIFS(A1:A2,">0",B1:B2,"<>")', v), 1);
+  assertEqual(runFormula('=COUNTIFS(A1:A2,">0",B1:B2,"")', v), 1);
+});
+
+test('Blank semantics', 'مساواة التواريخ بالقيمة لا بالمرجع', () => {
+  assertEqual(runFormula('=A1=DATE(2024,1,1)', { a1: new Date(2024, 0, 1) }), true);
+  assertEqual(runFormula('=A1=DATE(2024,1,2)', { a1: new Date(2024, 0, 1) }), false);
+});
+
+test('Blank semantics', 'AND/OR تتجاهل الفراغ داخل النطاق', () => {
+  assertEqual(runFormula('=AND(A1:A3)', { a1: true, a3: true }), true);
+  assertEqual(runFormula('=OR(A1:A3)', { a2: false }), false);
+  assertEqual(runFormula('=AND(A1:A3)', {}), '#VALUE!', 'لا قيمة إطلاقاً');
+  assertEqual(runFormula('=AND(A1:A2)', { a1: true, a2: false }), false);
+});
+
+test('Blank semantics', 'الدوال الرياضية على الفراغ = 0 مثل العوامل', () => {
+  assertEqual(runFormula('=POWER(A1,2)', {}), runFormula('=A1^2', {}));
+  assertEqual(runFormula('=POWER(A1,2)', {}), 0);
+  assertEqual(runFormula('=ABS(A1)', {}), 0);
+  assertEqual(runFormula('=SQRT(A1)', {}), 0);
+  assertEqual(runFormula('=MOD(A1,2)', {}), 0);
+  assertEqual(runFormula('=ROUND(A1,0)', {}), 0);
+  // ولا تزال تقبل النص الرقمي، وترفض غير الرقمي
+  assertEqual(runFormula('=ABS(A1)', { a1: '-4' }), 4);
+  assertEqual(runFormula('=SQRT(A1)', { a1: 'abc' }), '#VALUE!');
+  assertEqual(runFormula('=SQRT(-4)', {}), '#NUM!');
+});
+
+/* =========================================================
+   Error propagation — نوع الخطأ يصل لـIFERROR كما هو
+   ========================================================= */
+test('Error propagation', 'SUM ترجّع أول خطأ بدل أن تجعله صفراً', () => {
+  assertEqual(runFormula('=SUM(A1:A3)', { a1: 1, a2: '#N/A', a3: 2 }), '#N/A');
+  const t = { b1: 1, c1: 2, b2: 3, c2: 4 };
+  assertEqual(runFormula('=SUM(1,VLOOKUP(9,B1:C2,2,FALSE))', t), '#N/A');
+  assertEqual(runFormula('=IFERROR(SUM(1,VLOOKUP(9,B1:C2,2,FALSE)),"x")', t), 'x');
+  assertEqual(runFormula('=SUM(A1:A3)', { a1: 1, a3: 2 }), 3, 'الفراغ صفر كما كان');
+});
+
+test('Error propagation', 'العوامل تمرّر نوع الخطأ لا #VALUE!', () => {
+  const t = { b1: 1, c1: 2, b2: 3, c2: 4 };
+  assertEqual(runFormula('=VLOOKUP(9,B1:C2,2,FALSE)+1', t), '#N/A');
+  assertEqual(runFormula('=MOD(5,0)*2', {}), '#DIV/0!');
+  assertEqual(runFormula('=-A1', { a1: '#REF!' }), '#REF!');
+  assertEqual(runFormula('=A1-B1', { a1: 1, b1: '#NUM!' }), '#NUM!');
+  assertEqual(runFormula('=A1+1', { a1: 'abc' }), '#VALUE!', 'النص غير الرقمي يبقى #VALUE!');
+  assertEqual(runFormula('=ROUND(A1,0)', { a1: '#N/A' }), '#N/A');
+});
+
+test('Error propagation', 'VLOOKUP/HLOOKUP: رقم عمود/صف خارج الجدول', () => {
+  const t = { b1: 1, c1: 2, b2: 3, c2: 4, d1: 5, d2: 0 };
+  // من خلية (وقت التشغيل): #REF! و#VALUE! تلتقطهما IFERROR
+  assertEqual(runFormula('=VLOOKUP(1,B1:C2,D1,FALSE)', t), '#REF!');
+  assertEqual(runFormula('=VLOOKUP(1,B1:C2,D2,FALSE)', t), '#VALUE!');
+  assertEqual(runFormula('=IFERROR(VLOOKUP(1,B1:C2,D1,FALSE),"err")', t), 'err');
+  assertEqual(runFormula('=HLOOKUP(1,B1:C2,D1,FALSE)', t), '#REF!');
+  assertEqual(runFormula('=VLOOKUP(1,B1:C2,2,FALSE)', t), 2, 'الحالة السليمة كما هي');
+});
+
+test('Error propagation', 'رقم عمود حرفي خارج الجدول يُرفض وقت التحويل بموضع', () => {
+  assertThrows(() => convertFormula('=VLOOKUP(1,B1:C2,5,FALSE)'), 'أكبر من حجم الجدول');
+  assertThrows(() => convertFormula('=HLOOKUP(1,B1:C2,3)'), 'رقم الصف');
+  assertThrows(() => convertFormula('=VLOOKUP(1,B1:C2,0)'), 'أصغر من 1');
+  let err = null;
+  try {
+    convertFormula('=VLOOKUP(1,B1:C2,5)', { rangeParams: true });
+  } catch (e) {
+    err = e;
+  }
+  assertEqual(err && err.start, 1);
+});
+
+/* =========================================================
+   Excel Semantics (3.1.6)
+   ========================================================= */
+test('Excel Semantics', 'COUNTIF: "5" و"=5" و5 نفس الشرط', () => {
+  const v = { a1: 5, a2: '5', a3: 1 };
+  assertEqual(runFormula('=COUNTIF(A1:A3,"5")', v), 2);
+  assertEqual(runFormula('=COUNTIF(A1:A3,"=5")', v), 2);
+  assertEqual(runFormula('=COUNTIF(A1:A3,5)', v), 2);
+  assertEqual(runFormula('=COUNTIF(A1:A3,"<>5")', v), 1);
+});
+
+test('Excel Semantics', 'INDEX على صف واحد متجه أفقي', () => {
+  const v = { a1: 1, b1: 2, c1: 3, d1: 4, e1: 5 };
+  assertEqual(runFormula('=INDEX(A1:E1,3)', v), 3);
+  assertEqual(runFormula('=INDEX(A1:E1,9)', v), '#REF!');
+  assertEqual(runFormula('=INDEX(A1:E1,1,4)', v), 4);
+  assertEqual(runFormula('=INDEX(A1:A3,2)', { a1: 7, a2: 8, a3: 9 }), 8, 'العمود كما كان');
+});
+
+test('Excel Semantics', 'القيم المنطقية تُدمج بأحرف كبيرة', () => {
+  assertEqual(runFormula('=(A1>5)&""', { a1: 9 }), 'TRUE');
+  assertEqual(runFormula('=CONCATENATE(FALSE)', {}), 'FALSE');
+  assertEqual(runFormula('=LEN(TRUE)', {}), 4);
+});
+
+test('Tokenizer', 'الفاصلة العربية "،" فاصل وسائط', () => {
+  assertEqual(tokenize('SUM(1،2)')[3].type, 'COMMA');
+  assertEqual(runFormula('=SUM(1،2;3)', {}), 6);
+});
+
+test('Limits', 'خطأ حجم النطاق يحمل موضع النطاق نفسه', () => {
+  for (const rangeParams of [false, true]) {
+    let err = null;
+    try {
+      convertFormula('=1+SUM(A1:Z100)', { rangeParams });
+    } catch (e) {
+      err = e;
+    }
+    assertContains(err && err.message, 'النطاق كبير جداً');
+    assertEqual([err.start, err.end], [7, 14], `rangeParams=${rangeParams}`);
+  }
+});
+
+test('Generator', 'NS.VERSION مصدر الإصدار', () => {
+  const NS = (typeof window !== 'undefined' ? window : globalThis).ExcelToJS;
+  assertEqual(/^\d+\.\d+\.\d+$/.test(NS.VERSION), true);
 });

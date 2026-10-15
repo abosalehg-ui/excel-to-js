@@ -7,80 +7,80 @@
 (function (global) {
   const NS = (global.ExcelToJS = global.ExcelToJS || {});
 
+  // العوامل الحسابية الثنائية تتشارك جسماً واحداً ولا تختلف إلا في
+  // التعبير: الطرفان يمرّان على _num، وأول قيمة خطأ تمرّ كما هي.
+  // التوليد من جدول يُبقي هذا العقد في موضع واحد بدل خمس نسخ متطابقة.
+  const binaryArith = (name, expr) => ({
+    deps: ['_num'],
+    code: `function ${name}(a, b) {
+  const x = _num(a), y = _num(b);
+  if (typeof x === 'string') return x;
+  if (typeof y === 'string') return y;
+  return ${expr};
+}`
+  });
+
   const HELPERS = {
-    // _str: تحويل نصي بدلالات Excel — الخلية الفارغة نص فارغ لا "undefined".
-    // كل موضع كان يستدعي String(x) مباشرةً يمرّ من هنا الآن.
+    // _str: تحويل نصي بدلالات Excel — الخلية الفارغة نص فارغ، والقيم
+    // المنطقية بأحرف كبيرة كما يعرضها Excel ("TRUE" لا "true")
     _str: {
       code: `function _str(v) {
-  return v === null || v === undefined ? '' : String(v);
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  return String(v);
 }`
     },
 
-    // _num: تطبيع رقمي بدلالات Excel — أساس العوامل الحسابية كلها.
-    // الخلية الفارغة (null/undefined/"") صفر كما في Excel، وما لا يقبل
-    // التحويل رقماً يعطي ‎#VALUE!‎ لا NaN صامتاً.
+    // _num: تطبيع رقمي بدلالات Excel — أساس العوامل والدوال الرياضية.
+    // الفراغ صفر، وقيمة الخطأ (#N/A وغيرها) ترجع كما هي ليصل نوعها
+    // لـIFERROR، وما لا يقبل التحويل رقماً يعطي #VALUE!
     _num: {
+      deps: ['_isError'],
       code: `function _num(v) {
   if (v === null || v === undefined || v === '') return 0;
+  if (typeof v === 'string' && _isError(v)) return v;
   const n = Number(v);
   return isNaN(n) ? '#VALUE!' : n;
 }`
     },
 
-    // العوامل الحسابية (+ - * / ^ والسالب الأحادي): عملية حسابية دائماً
-    // كما في Excel، لا دلالات JS. ‏"5" + "3" في JS دمج نصّي = "53"،
-    // والفراغ في '-' و'*' كان يعطي NaN صامتة. كانت '+' وحدها مصلحة في
-    // 3.1.4 والبقية بدلالات JS — سلوك متناقض داخل الأداة نفسها.
-    // ‏#VALUE! من أي طرف يمرّ عبر العملية بدل أن ينقلب NaN.
-    _add: {
-      deps: ['_num'],
-      code: `function _add(a, b) {
-  const x = _num(a), y = _num(b);
-  return x === '#VALUE!' || y === '#VALUE!' ? '#VALUE!' : x + y;
-}`
-    },
-    _sub: {
-      deps: ['_num'],
-      code: `function _sub(a, b) {
-  const x = _num(a), y = _num(b);
-  return x === '#VALUE!' || y === '#VALUE!' ? '#VALUE!' : x - y;
-}`
-    },
-    _mul: {
-      deps: ['_num'],
-      code: `function _mul(a, b) {
-  const x = _num(a), y = _num(b);
-  return x === '#VALUE!' || y === '#VALUE!' ? '#VALUE!' : x * y;
-}`
-    },
-    // القسمة على صفر تبقى Infinity (وNaN لـ 0/0) — انحراف موثق مقصود،
-    // تلتقطه IFERROR/ISERROR كما في بقية الأداة
-    _div: {
-      deps: ['_num'],
-      code: `function _div(a, b) {
-  const x = _num(a), y = _num(b);
-  return x === '#VALUE!' || y === '#VALUE!' ? '#VALUE!' : x / y;
-}`
-    },
-    _pow: {
-      deps: ['_num'],
-      code: `function _pow(a, b) {
-  const x = _num(a), y = _num(b);
-  return x === '#VALUE!' || y === '#VALUE!' ? '#VALUE!' : Math.pow(x, y);
-}`
-    },
+    // القسمة على صفر تبقى Infinity (وNaN لـ0/0) — انحراف موثق مقصود
+    // تلتقطه IFERROR/ISERROR
+    _add: binaryArith('_add', 'x + y'),
+    _sub: binaryArith('_sub', 'x - y'),
+    _mul: binaryArith('_mul', 'x * y'),
+    _div: binaryArith('_div', 'x / y'),
+    _pow: binaryArith('_pow', 'Math.pow(x, y)'),
+
     _neg: {
       deps: ['_num'],
       code: `function _neg(a) {
   const x = _num(a);
-  return x === '#VALUE!' ? '#VALUE!' : -x;
+  return typeof x === 'string' ? x : -x;
+}`
+    },
+
+    _abs: {
+      deps: ['_num'],
+      code: `function _abs(a) {
+  const x = _num(a);
+  return typeof x === 'string' ? x : Math.abs(x);
+}`
+    },
+
+    // الجذر لعدد سالب في Excel = #NUM! لا NaN
+    _sqrt: {
+      deps: ['_num'],
+      code: `function _sqrt(a) {
+  const x = _num(a);
+  if (typeof x === 'string') return x;
+  return x < 0 ? '#NUM!' : Math.sqrt(x);
 }`
     },
 
     // _toDate: توحيد قبول التاريخ — Date كما هي. صيغة التاريخ-فقط
-    // "YYYY-MM-DD" تُبنى يدوياً بالتوقيت المحلي: تمريرها لـnew Date
-    // يفسّرها منتصف ليل UTC فتنزاح يوماً كاملاً في المناطق غرب غرينتش
-    // (YEAR("2024-01-01") كانت ترجع 2023 بتوقيت نيويورك).
+    // "YYYY-MM-DD" تُبنى يدوياً بالتوقيت المحلي: new Date يفسّرها منتصف
+    // ليل UTC فتنزاح يوماً كاملاً في المناطق غرب غرينتش
     _toDate: {
       code: `function _toDate(v) {
   if (v instanceof Date) return v;
@@ -92,9 +92,15 @@
 }`
     },
 
-    // _eq: مساواة بدلالات Excel — مقارنة النصوص غير حساسة لحالة الأحرف
+    // _eq: مساواة بدلالات Excel. الخلية الفارغة تأخذ "صفر" نوع الطرف
+    // الآخر (0 أو "" أو FALSE) — فـ=A1="" و=A1=0 على فراغ = TRUE.
+    // النصوص غير حساسة لحالة الأحرف، والتواريخ تُقارن بقيمتها لا بمرجعها
     _eq: {
       code: `function _eq(a, b) {
+  const blankAs = (o) => typeof o === 'number' ? 0 : typeof o === 'boolean' ? false : '';
+  if (a === null || a === undefined) a = blankAs(b);
+  if (b === null || b === undefined) b = blankAs(a);
+  if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
   if (typeof a === 'string' && typeof b === 'string') {
     return a.toLowerCase() === b.toLowerCase();
   }
@@ -102,18 +108,35 @@
 }`
     },
 
-    // _nums: يفرد المصفوفة ويُبقي الأرقام الصالحة فقط (أساس SUM/AVERAGE/MIN/MAX/COUNT)
+    // _nums: يفرد المصفوفة ويُبقي الأرقام الصالحة فقط (أساس AVERAGE/MIN/MAX/COUNT)
     _nums: {
       code: `function _nums(arr) {
   return arr.flat(Infinity).filter(v => typeof v === 'number' && !isNaN(v));
 }`
     },
 
+    // _sum: أول قيمة خطأ في الوسائط ترجع كما هي (كما في Excel) بدل أن
+    // تنقلب صفراً صامتاً، فتلتقطها IFERROR
+    _sum: {
+      deps: ['_isError'],
+      code: `function _sum(arr) {
+  let s = 0;
+  for (const v of arr.flat(Infinity)) {
+    if (_isError(v)) return v;
+    s += Number(v) || 0;
+  }
+  return s;
+}`
+    },
+
     // _mod: باقي القسمة بدلالات Excel — إشارة الناتج تتبع المقسوم عليه
     // (‏JS: -3 % 2 = -1، بينما Excel: MOD(-3,2) = 1)
     _mod: {
+      deps: ['_num'],
       code: `function _mod(a, b) {
-  const x = Number(a), y = Number(b);
+  const x = _num(a), y = _num(b);
+  if (typeof x === 'string') return x;
+  if (typeof y === 'string') return y;
   if (y === 0) return '#DIV/0!';
   return ((x % y) + y) % y;
 }`
@@ -122,10 +145,12 @@
     // _round: تقريب بدلالات Excel — النصف يُقرَّب بعيداً عن الصفر
     // (‏Math.round(-2.5) = -2، بينما Excel: ROUND(-2.5,0) = -3)
     _round: {
+      deps: ['_num'],
       code: `function _round(n, digits) {
-  const x = Number(n);
-  if (isNaN(x)) return '#VALUE!';
-  const f = Math.pow(10, Number(digits) || 0);
+  const x = _num(n), d = _num(digits);
+  if (typeof x === 'string') return x;
+  if (typeof d === 'string') return d;
+  const f = Math.pow(10, Math.trunc(d));
   const scaled = x * f;
   const r = scaled < 0 ? -Math.round(-scaled) : Math.round(scaled);
   return r / f;
@@ -151,40 +176,58 @@
 }`
     },
 
-    // _matchCriteria: يحاكي شروط COUNTIF مثل ">5", "<>0", "محمد"
+    // _matchCriteria: يحاكي شروط COUNTIF مثل ">5", "<>0", "محمد".
+    // الخلية الفارغة لا تطابق إلا "" و"=" ويقبلها كل "<>" ما عدا "<>" وحدها.
+    // المعيار الرقمي — حرفياً أو نصاً رقمياً مثل "5" — يطابق الرقم والنص
+    // الرقمي معاً، فـ"5" و"=5" و5 كلها نفس الشرط كما في Excel
     _matchCriteria: {
       deps: ['_eq'],
       code: `function _matchCriteria(value, criteria) {
-  if (typeof criteria === 'number') return value === criteria;
-  if (typeof criteria !== 'string') return value === criteria;
-  const m = criteria.match(/^(>=|<=|<>|>|<|=)(.*)$/);
-  if (m) {
-    const op = m[1];
-    let val = m[2].trim();
-    const num = Number(val);
-    if (!isNaN(num) && val !== '') val = num;
-    switch (op) {
-      case '>':  return value > val;
-      case '<':  return value < val;
-      case '>=': return value >= val;
-      case '<=': return value <= val;
-      case '<>': return !_eq(value, val);
-      case '=':  return _eq(value, val);
+  const blank = value === null || value === undefined || value === '';
+  const toNum = (s) => typeof s === 'string' && s.trim() !== '' ? Number(s) : NaN;
+  const same = (v, c) => {
+    if (typeof c === 'number') {
+      return v === c || (typeof v === 'string' && toNum(v) === c);
     }
+    return _eq(v, c);
+  };
+  let op = '=', val = criteria;
+  if (typeof criteria === 'string') {
+    const m = criteria.match(/^(>=|<=|<>|>|<|=)(.*)$/);
+    if (m) { op = m[1]; val = m[2].trim(); }
+    if (!isNaN(toNum(val))) val = toNum(val);
   }
-  return _eq(value, criteria);
+  if (blank) {
+    if (op === '=') return val === '';
+    if (op === '<>') return val !== '';
+    return false;
+  }
+  switch (op) {
+    case '>':  return value > val;
+    case '<':  return value < val;
+    case '>=': return value >= val;
+    case '<=': return value <= val;
+    case '<>': return !same(value, val);
+    default:   return same(value, val);
+  }
 }`
     },
 
-    // _vlookup: البحث العمودي (تام أو تقريبي بدلالات Excel)
+    // _vlookup: البحث العمودي (تام أو تقريبي بدلالات Excel).
+    // رقم العمود يُفحص قبل البحث: < 1 → #VALUE!، وأكبر من عرض الجدول
+    // → #REF! — وإلا رجعت undefined لا تلتقطها IFERROR
     _vlookup: {
       deps: ['_eq'],
       code: `function _vlookup(lookupValue, table, colIndex, exactMatch) {
   if (!Array.isArray(table) || table.length === 0) return '#N/A';
+  const c = Math.trunc(Number(colIndex));
+  if (!(c >= 1)) return '#VALUE!';
+  const width = Array.isArray(table[0]) ? table[0].length : 0;
+  if (c > width) return '#REF!';
   if (exactMatch) {
     for (const row of table) {
       if (!Array.isArray(row) || row.length === 0) continue;
-      if (_eq(row[0], lookupValue)) return row[colIndex - 1];
+      if (_eq(row[0], lookupValue)) return row[c - 1];
     }
     return '#N/A';
   }
@@ -195,17 +238,21 @@
     if (!Array.isArray(row) || row.length === 0) continue;
     if (row[0] <= lookupValue) best = row;
   }
-  return best ? best[colIndex - 1] : '#N/A';
+  return best ? best[c - 1] : '#N/A';
 }`
     },
 
-    // _hlookup: البحث الأفقي (تام أو تقريبي بدلالات Excel)
+    // _hlookup: البحث الأفقي (تام أو تقريبي بدلالات Excel)، بنفس فحص
+    // رقم الصف الذي في _vlookup
     _hlookup: {
       deps: ['_eq'],
       code: `function _hlookup(lookupValue, table, rowIndex, exactMatch) {
   if (!Array.isArray(table) || table.length === 0) return '#N/A';
   const firstRow = table[0];
   if (!Array.isArray(firstRow)) return '#N/A';
+  const r = Math.trunc(Number(rowIndex));
+  if (!(r >= 1)) return '#VALUE!';
+  if (r > table.length) return '#REF!';
   let bestCol = -1;
   for (let c = 0; c < firstRow.length; c++) {
     if (exactMatch) {
@@ -216,16 +263,21 @@
     }
   }
   if (bestCol === -1) return '#N/A';
-  const targetRow = table[rowIndex - 1];
-  return targetRow ? targetRow[bestCol] : '#N/A';
+  const targetRow = table[r - 1];
+  return Array.isArray(targetRow) ? targetRow[bestCol] : '#N/A';
 }`
     },
 
-    // _index: استرجاع قيمة بإحداثيات
+    // _index: استرجاع قيمة بإحداثيات. النطاق ذو الصف الواحد متجه أفقي:
+    // INDEX(A1:E1,3) = C1 كما في Excel، لا الصف الثالث غير الموجود
     _index: {
       code: `function _index(arr, rowNum, colNum) {
   if (!Array.isArray(arr)) return '#REF!';
   if (Array.isArray(arr[0])) {
+    if (arr.length === 1 && colNum === undefined && arr[0].length > 1) {
+      const v = arr[0][rowNum - 1];
+      return rowNum >= 1 && rowNum <= arr[0].length ? v : '#REF!';
+    }
     const row = arr[rowNum - 1];
     if (!row) return '#REF!';
     if (colNum === undefined || colNum === 0) {
@@ -237,7 +289,6 @@
   return arr[rowNum - 1];
 }`
     },
-
     // _match: البحث عن موضع قيمة
     _match: {
       deps: ['_eq'],
