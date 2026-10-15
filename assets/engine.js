@@ -15,6 +15,10 @@
   /* ============================================================
    حدود الموارد — تمنع صيغة صغيرة من تجميد المتصفح
    ============================================================ */
+  // مصدر حقيقة واحد للإصدار: تذييل الصفحة يقرأه، والاختبارات تطابقه
+  // مع package.json
+  const VERSION = '3.1.6';
+
   const LIMITS = {
     inputLength: 10000, // أقصى طول للصيغة المُدخلة
     parseDepth: 64, // أقصى عمق تداخل في الـ AST
@@ -27,7 +31,7 @@
    Tokenizer
    ------------------------------------------------------------
    الأنماط بعلم y (sticky) وتُطابَق عند lastIndex مباشرة، فلا
-   يُنشَأ نص جديد لكل token (كان src.slice(pos) يجعلها O(n²)).
+   يُنشَأ نص جديد لكل token (‏src.slice(pos) لكل رمز = O(n²)).
    ============================================================ */
   const PATTERNS = [
     [/\s+/y, null],
@@ -43,7 +47,8 @@
     [/\.\d+(?:[Ee][+-]?\d+)?/y, 'NUMBER'],
     [/(<=|>=|<>|=|<|>)/y, 'OPERATOR_CMP'],
     [/[+\-*/%^&]/y, 'OPERATOR'],
-    [/[,;]/y, 'COMMA'],
+    // ‏";" فاصل Excel في اللغات العربية، و"،" ما يكتبه المستخدم العربي بيده
+    [/[,;،]/y, 'COMMA'],
     [/\(/y, 'LPAREN'],
     [/\)/y, 'RPAREN']
   ];
@@ -187,10 +192,8 @@
       return left;
     }
     // حارس مشترك لسلاسل المعاملات الأحادية واللواحق: كلاهما يبني عقداً
-    // متداخلة يمرّ عليها المولّد تعاوداً، فسلسلة طويلة تكسر المكدّس.
-    // ‏LIMITS.parseDepth كان مطبّقاً في parsePrimary وحدها، فسلسلة مثل
-    // "=-----…-A1" تتجاوزه كلياً وتنتهي بـRangeError إنجليزي خام أو
-    // برسالة "الرجاء الإبلاغ" المضلّلة من شبكة الأمان النحوية.
+    // متداخلة يمرّ عليها المولّد تعاوداً، فسلسلة طويلة تكسر المكدّس —
+    // وحدّ parsePrimary لا يراها لأنها لا تمرّ عليه
     const checkChain = (n, tok) => {
       if (n <= LIMITS.parseDepth) return;
       const err = new Error(
@@ -278,7 +281,8 @@
         eat();
         // نطبّع $ والمسافات حول النقطتين (Excel يقبل "A1 : B2")
         const [s, e] = t.value.replace(/[$\s]/g, '').split(':');
-        return { type: 'Range', start: s, end: e };
+        // ‏pos موضع النطاق في الصيغة، ليعلّم المحرر النطاق المرفوض نفسه
+        return { type: 'Range', start: s, end: e, pos: { start: t.start, end: t.end } };
       }
       if (t.type === 'FUNCTION') {
         const fnTok = eat();
@@ -353,6 +357,22 @@
     for (const ch of c.toUpperCase()) n = n * 26 + (ch.charCodeAt(0) - 64);
     return n;
   };
+  // أبعاد النطاق بلا فحص حدود — يحتاجها generate وفحوص validate في العقود
+  function rangeSize(start, end) {
+    const m1 = start.match(/^([A-Za-z]+)(\d+)$/);
+    const m2 = end.match(/^([A-Za-z]+)(\d+)$/);
+    if (!m1 || !m2) throw new Error(`نطاق غير صالح: ${start}:${end}`);
+    const c1 = colToNum(m1[1]),
+      c2 = colToNum(m2[1]);
+    const r1 = parseInt(m1[2]),
+      r2 = parseInt(m2[2]);
+    const cMin = Math.min(c1, c2),
+      cMax = Math.max(c1, c2);
+    const rMin = Math.min(r1, r2),
+      rMax = Math.max(r1, r2);
+    return { cMin, cMax, rMin, rMax, rows: rMax - rMin + 1, cols: cMax - cMin + 1 };
+  }
+
   const numToCol = (n) => {
     let s = '';
     while (n > 0) {
@@ -373,7 +393,7 @@
   };
 
   // العوامل الحسابية → الـhelper المكافئ. كلها مبنية على _num:
-  // الفراغ صفر، غير الرقمي #VALUE! — لا دمج نصّي ولا NaN صامتة
+  // الفراغ صفر، الخطأ يمرّ بنوعه، غير الرقمي #VALUE!
   const ARITH_HELPERS = {
     '+': '_add',
     '-': '_sub',
@@ -385,9 +405,8 @@
   /* ------------------------------------------------------------
    gen — يحوّل عقدة AST إلى نصّ تعبير JS
    ------------------------------------------------------------
-   على مستوى الوحدة لا داخل generate: كانت generate تتجاوز 200 سطر
-   تحتضن ثمان دوال متداخلة. الحالة المشتركة تصل هنا صراحةً عبر state
-   بدل الإغلاق الضمني، فحدود المسؤولية تبقى ظاهرة.
+   على مستوى الوحدة لا داخل generate: الحالة المشتركة تصل صراحةً عبر
+   state بدل الإغلاق الضمني، فحدود المسؤولية تبقى ظاهرة.
 
    state = { rangeParams, cellVar, expandRangeToMatrix, rangeParamName,
              registerHelper, ctx }
@@ -406,23 +425,31 @@
         return state.cellVar(node.name);
 
       case 'Range': {
-        if (state.rangeParams) {
-          // الباراميتر يصل دائماً كمصفوفة ثنائية؛ السياق المسطّح يفرده
-          const name = state.rangeParamName(node.start, node.end);
-          return needsMatrix ? name : `${name}.flat(Infinity)`;
+        try {
+          if (state.rangeParams) {
+            // الباراميتر يصل دائماً كمصفوفة ثنائية؛ السياق المسطّح يفرده
+            const name = state.rangeParamName(node.start, node.end);
+            return needsMatrix ? name : `${name}.flat(Infinity)`;
+          }
+          const { matrix } = state.expandRangeToMatrix(node.start, node.end);
+          if (needsMatrix) {
+            const rowStrs = matrix.map((row) => `[${row.join(', ')}]`);
+            return `[${rowStrs.join(', ')}]`;
+          }
+          return `[${matrix.flat().join(', ')}]`;
+        } catch (e) {
+          // أخطاء الحجم تنشأ في generate بلا موضع؛ النطاق نفسه هو الموضع
+          if (typeof e.start !== 'number' && node.pos) {
+            e.start = node.pos.start;
+            e.end = node.pos.end;
+          }
+          throw e;
         }
-        const { matrix } = state.expandRangeToMatrix(node.start, node.end);
-        if (needsMatrix) {
-          const rowStrs = matrix.map((row) => `[${row.join(', ')}]`);
-          return `[${rowStrs.join(', ')}]`;
-        }
-        return `[${matrix.flat().join(', ')}]`;
       }
 
       case 'Unary':
-        // السالب الأحادي حسابي كذلك: ‏-فراغ = 0 في Excel لا NaN.
-        // الموجب الأحادي في Excel محايد تماماً (يُرجع القيمة كما هي حتى
-        // لو نصاً)، بينما ‎+x‎ في JS كان يقسرها رقماً
+        // السالب الأحادي حسابي كذلك (‏-فراغ = 0)، والموجب الأحادي في Excel
+        // محايد تماماً يُرجع القيمة كما هي حتى لو نصاً — لا قسر ‎+x‎ في JS
         if (node.op === '-') {
           state.registerHelper('_neg');
           return `_neg(${gen(node.arg, state)})`;
@@ -436,13 +463,13 @@
       case 'Binary': {
         const L = gen(node.left, state);
         const R = gen(node.right, state);
-        // الخلية الفارغة نص فارغ في Excel — String(undefined) كان يعطي "undefined"
+        // الخلية الفارغة نص فارغ في Excel لا "undefined"
         if (node.op === '&') {
           state.registerHelper('_str');
           return `(_str(${L}) + _str(${R}))`;
         }
-        // العوامل الحسابية في Excel عمليات حسابية دائماً — "5"+"3" في JS
-        // كان يعطي "53"، و=A1-A2 على فراغين NaN بينما =A1+A2 عليهما 0
+        // العوامل الحسابية في Excel عمليات حسابية دائماً، لا دمج نصّي
+        // (‏"5"+"3" في JS = "53")
         if (ARITH_HELPERS[node.op]) {
           const h = ARITH_HELPERS[node.op];
           state.registerHelper(h);
@@ -480,6 +507,16 @@
           err.start = node.start;
           err.end = node.end;
           throw err;
+        }
+
+        if (fn.validate) {
+          const msg = fn.validate(node.args, (r) => rangeSize(r.start, r.end));
+          if (msg) {
+            const err = new Error(`الدالة ${node.name}: ${msg}`);
+            err.start = node.start;
+            err.end = node.end;
+            throw err;
+          }
         }
 
         if (fn.usesHelpers) {
@@ -562,27 +599,13 @@
     };
 
     function rangeBounds(start, end) {
-      const m1 = start.match(/^([A-Za-z]+)(\d+)$/);
-      const m2 = end.match(/^([A-Za-z]+)(\d+)$/);
-      if (!m1 || !m2) throw new Error(`نطاق غير صالح: ${start}:${end}`);
-
-      const c1 = colToNum(m1[1]),
-        c2 = colToNum(m2[1]);
-      const r1 = parseInt(m1[2]),
-        r2 = parseInt(m2[2]);
-      const cMin = Math.min(c1, c2),
-        cMax = Math.max(c1, c2);
-      const rMin = Math.min(r1, r2),
-        rMax = Math.max(r1, r2);
-      const rows = rMax - rMin + 1;
-      const cols = cMax - cMin + 1;
-
-      if (rows * cols > LIMITS.rangeCells) {
+      const b = rangeSize(start, end);
+      if (b.rows * b.cols > LIMITS.rangeCells) {
         throw new Error(
-          `النطاق كبير جداً (${rows * cols} خلية). الحد الأقصى ${LIMITS.rangeCells}.`
+          `النطاق كبير جداً (${b.rows * b.cols} خلية). الحد الأقصى ${LIMITS.rangeCells}.`
         );
       }
-      return { cMin, cMax, rMin, rMax, rows, cols };
+      return b;
     }
 
     // وضع الخلايا المفردة: النطاق يتمدّد لمصفوفة من أسماء المتغيّرات
@@ -705,10 +728,8 @@
     // ‏(new Function تُصرّف فقط ولا تنفّذ — الـ helpers غير المعرفة لا تضر)
     //
     // تعمل خارج المتصفح فقط: الحارس يلتقط أخطاء الـgenerator لا أخطاء
-    // المستخدم، أي إنه أداة تطوير. تشغيله في الصفحة كان يفرض
-    // 'unsafe-eval' في الـCSP — إضعاف دائم لأقوى بند فيها مقابل فحص
-    // تغطّيه حزمة الاختبارات في Node أصلاً. للتفعيل يدوياً:
-    // ‏ExcelToJS.SYNTAX_CHECK = true
+    // المستخدم، وتشغيله في الصفحة يفرض 'unsafe-eval' في الـCSP مقابل فحص
+    // تغطّيه حزمة الاختبارات في Node. للتفعيل يدوياً: ExcelToJS.SYNTAX_CHECK = true
     if (syntaxCheckEnabled()) {
       try {
         new Function(paramNames.join(', '), `return ${expr};`);
@@ -743,12 +764,13 @@
     return { code: lines.join('\n'), usedCells, usedRanges, usedHelpers, paramNames };
   }
 
+  NS.VERSION = VERSION;
   NS.LIMITS = LIMITS;
   NS.tokenize = tokenize;
   NS.parse = parse;
   NS.generate = generate;
   NS.convertFormula = convertFormula;
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { LIMITS, tokenize, parse, generate, convertFormula };
+    module.exports = { VERSION, LIMITS, tokenize, parse, generate, convertFormula };
   }
 })(typeof window !== 'undefined' ? window : globalThis);

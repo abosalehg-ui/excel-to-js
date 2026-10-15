@@ -177,6 +177,9 @@
     $('fn-count-badge').textContent = `${FN_COUNT} دالة`;
     $('fn-count-section').textContent = String(FN_COUNT);
     $('fn-count-footer').textContent = String(FN_COUNT);
+    // الإصدار من engine.js — النص الثابت في HTML احتياط لمن يعطّل JS فقط
+    const $version = $('app-version');
+    if ($version && NS.VERSION) $version.textContent = NS.VERSION;
 
     /* ----- تظليل الصيغة في المحرر ----- */
     function renderHighlight(input, errorRange) {
@@ -229,8 +232,8 @@
     }
 
     /* ----- حالة الخطأ على الحقل نفسه -----
-     التعليم البصري (.err-mark) مرئي بحت — قارئ الشاشة عند التركيز على
-     المحرر ما كان يعرف إن فيه خطأ أصلاً ولا وش هو. */
+     التعليم البصري (.err-mark) مرئي بحت، فقارئ الشاشة يحتاج aria-invalid
+     وربط الحقل برسالة الخطأ ليعرف وجوده ونصّه. */
     function setFieldError(hasError) {
       if (hasError) {
         $input.setAttribute('aria-invalid', 'true');
@@ -288,8 +291,8 @@
       if (usedHelpers && usedHelpers.length > 0) {
         $outputInfo.appendChild(item('🔧 Helpers مولّدة: ', usedHelpers.join(', ')));
       }
-      // توقيع بعشرات الباراميترات غير قابل للاستدعاء عملياً، والحل موجود
-      // في المنتج — لكن المستخدم كان لازم يكتشف المفتاح بنفسه
+      // توقيع بعشرات الباراميترات غير قابل للاستدعاء عملياً، فنشير للمفتاح
+      // الذي يحلّه بدل أن يكتشفه المستخدم بنفسه
       if (paramNames.length > PARAM_NUDGE_THRESHOLD && $rangeMode && !$rangeMode.checked) {
         $outputInfo.appendChild(
           el(
@@ -347,10 +350,9 @@
       } catch (e) {
         lastCode = '';
         if (silent) {
-          // الفشل الصامت كان يترك اللوحة فاضية بلا أي تفسير: مستخدم يلصق
-          // صيغة فيها دالة غير مدعومة ما يرى شيئاً ولا يعرف إن زر «تحويل»
-          // يخبره بالسبب. الكتابة الجارية تبقى صامتة (الصيغة نصف المكتوبة
-          // خاطئة دائماً)، أما اللصق فيُعرض خطؤه كاملاً.
+          // الكتابة الجارية تبقى صامتة (الصيغة نصف المكتوبة خاطئة دائماً)،
+          // لكن اللوحة لا تُترك فاضية: التلميح يدلّ على زر «تحويل» للتفاصيل.
+          // اللصق لا يمرّ من هنا — يُعرض خطؤه كاملاً
           hideStatus();
           setFieldError(false);
           showOutput('', 'الصيغة غير مكتملة أو غير مدعومة — اضغط «تحويل» للتفاصيل');

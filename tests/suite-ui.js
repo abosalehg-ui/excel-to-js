@@ -309,6 +309,10 @@ uiTest('عدّاد الدوال يُشتق من القاموس', ({ doc }) => {
   assertContains(doc.getElementById('fn-count-badge').textContent, n);
 });
 
+uiTest('التذييل يعرض NS.VERSION', ({ doc }) => {
+  assertEqual(doc.getElementById('app-version').textContent, globalThis.ExcelToJS.VERSION);
+});
+
 uiTest('تبديل الثيم يضبط data-theme و aria-pressed', ({ doc }) => {
   const toggle = doc.getElementById('theme-toggle');
   assertEqual(doc.documentElement.dataset.theme, '');

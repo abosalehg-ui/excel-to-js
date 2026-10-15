@@ -73,8 +73,16 @@ if (lock.version !== pkg.version) {
 }
 
 const indexHtml = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
-if (indexHtml.indexOf(`النسخة ${pkg.version}`) === -1) {
+if (indexHtml.indexOf(`id="app-version">${pkg.version}<`) === -1) {
   console.error(`✗ إصدار index.html لا يطابق package.json (${pkg.version})`);
+  fail++;
+}
+
+// ‏NS.VERSION مصدر الإصدار في الصفحة (التذييل يقرأه وقت التشغيل)
+if (globalThis.ExcelToJS.VERSION !== pkg.version) {
+  console.error(
+    `✗ ExcelToJS.VERSION (${globalThis.ExcelToJS.VERSION}) لا يطابق package.json (${pkg.version})`
+  );
   fail++;
 }
 
@@ -117,6 +125,37 @@ if (testBadge && Number(testBadge[2]) !== TESTS.length) {
     `✗ شارة عدد الاختبارات في README (${testBadge[2]}) لا تطابق الحزمة (${TESTS.length})`
   );
   fail++;
+}
+
+// جدول الاختبارات في README كان يُحدَّث يدوياً فتقادم (196 مقابل 232 فعلياً).
+// كل صف "| فئة | عدد |" داخل القسم يُطابَق مع الحزمة، والمجموع كذلك.
+const testSection = readme.split('## 🧪 الاختبارات')[1];
+if (!testSection) {
+  console.error('✗ ما لقيت قسم "الاختبارات" في README');
+  fail++;
+} else {
+  const table = testSection.split('\n## ')[0];
+  const seen = new Set();
+  for (const m of table.matchAll(/^\|\s*([^|*]+?)\s*\|\s*(\d+)\s*\|/gm)) {
+    const [, cat, n] = m;
+    seen.add(cat);
+    const actual = counts[cat] ? counts[cat].pass + counts[cat].fail + counts[cat].skip : 0;
+    if (Number(n) !== actual) {
+      console.error(`✗ جدول الاختبارات في README: "${cat}" = ${n} والفعلي ${actual}`);
+      fail++;
+    }
+  }
+  for (const cat of Object.keys(counts)) {
+    if (!seen.has(cat)) {
+      console.error(`✗ جدول الاختبارات في README ينقصه صف للفئة "${cat}"`);
+      fail++;
+    }
+  }
+  const total = table.match(/\*\*(\d+)\/(\d+) ✓\*\*/);
+  if (!total || Number(total[2]) !== TESTS.length) {
+    console.error(`✗ مجموع جدول الاختبارات في README لا يطابق الحزمة (${TESTS.length})`);
+    fail++;
+  }
 }
 
 process.exit(fail > 0 ? 1 : 0);
