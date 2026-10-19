@@ -13,11 +13,11 @@ updates:
     open-pull-requests-limit: 5
     groups:
       minor-and-patch:
-        patterns: ["*"]
-        update-types: ["minor", "patch"]
+        patterns: ['*']
+        update-types: ['minor', 'patch']
       major:
-        patterns: ["*"]
-        update-types: ["major"]
+        patterns: ['*']
+        update-types: ['major']
 
   - package-ecosystem: github-actions
     directory: /
@@ -26,4 +26,4 @@ updates:
     open-pull-requests-limit: 5
     groups:
       github-actions:
-        patterns: ["*"]
+        patterns: ['*']
