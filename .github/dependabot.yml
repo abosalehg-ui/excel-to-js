@@ -3,15 +3,27 @@ version: 2
 # التبعيات هنا أدوات تطوير فقط (jsdom, prettier) وإجراءات CI مثبّتة على SHA.
 # التثبيت على SHA يمنع الانجراف الصامت، لكنه يعني أن التحديث لن يصل إلا
 # بفتح PR — وهذه مهمة dependabot.
+# التحديثات مجمّعة شهريًا: PR واحد لكل مجموعة بدل PR لكل مكتبة، فلا تتراكم
+# وتتقادم. الترقيات الرئيسية في مجموعة مستقلة لأنها وحدها قد تكسر البناء.
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        patterns: ['*']
+        update-types: ['minor', 'patch']
+      major:
+        patterns: ['*']
+        update-types: ['major']
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ['*']
